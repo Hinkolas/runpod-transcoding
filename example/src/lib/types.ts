@@ -5,15 +5,18 @@ export type VideoStatus = 'idle' | 'queued' | 'processing' | 'ready' | 'error';
 
 export type VideoCodec = 'h264' | 'h265';
 
-/** One output quality level — mirrors the worker's `Rendition`. */
+/** One output quality level — mirrors the worker's `Rendition`.
+ * Set exactly one of `crf` (constant quality) or `videoBitrate` (ABR). */
 export type Rendition = {
 	label: string;
 	height: number;
-	videoBitrate: string;
+	crf?: number | null;
+	videoBitrate?: string | null;
 	maxrate: string;
 	bufsize: string;
 	codec: VideoCodec;
 	audioBitrate: string;
+	preset?: string;
 };
 
 /** Everything the user can tweak in the settings modal before encoding. */
