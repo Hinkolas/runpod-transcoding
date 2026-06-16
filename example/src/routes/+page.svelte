@@ -148,7 +148,7 @@
 			{#if selected}
 				<div class="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6">
 					<h2 class="truncate text-xl font-semibold" title={selected.title}>{selected.title}</h2>
-					<dl class="mt-5 grid grid-cols-2 gap-4 text-base sm:grid-cols-4">
+					<dl class="mt-5 grid grid-cols-2 gap-4 text-base sm:grid-cols-3">
 						<div>
 							<dt class="text-sm text-zinc-500">Source</dt>
 							<dd class="mt-1 text-zinc-200">
@@ -158,16 +158,26 @@
 							</dd>
 						</div>
 						<div>
+							<dt class="text-sm text-zinc-500">Codec</dt>
+							<dd class="mt-1 text-zinc-200">{selected.probe?.codec ?? '—'}</dd>
+						</div>
+						<div>
 							<dt class="text-sm text-zinc-500">Renditions</dt>
 							<dd class="mt-1 text-zinc-200">{selected.renditionsOut?.length ?? '—'}</dd>
+						</div>
+						<div>
+							<dt class="text-sm text-zinc-500">Compute (billed)</dt>
+							<dd class="mt-1 text-zinc-200">{formatDuration(selected.executionTimeMs)}</dd>
 						</div>
 						<div>
 							<dt class="text-sm text-zinc-500">Encode time</dt>
 							<dd class="mt-1 text-zinc-200">{formatDuration(selected.durationMs)}</dd>
 						</div>
 						<div>
-							<dt class="text-sm text-zinc-500">Codec</dt>
-							<dd class="mt-1 text-zinc-200">{selected.probe?.codec ?? '—'}</dd>
+							<dt class="text-sm text-zinc-500">App</dt>
+							<dd class="mt-1 text-zinc-200">
+								{(selected.metadata?.app as string | undefined) ?? '—'}
+							</dd>
 						</div>
 					</dl>
 

@@ -43,8 +43,16 @@ Environment variables (all read at runtime):
 | `RUNPOD_ENDPOINT_ID` | yes | The serverless endpoint running `worker/`. |
 | `PUBLIC_BASE_URL` | recommended | Publicly reachable base URL of *this* server (no trailing slash). Falls back to the request origin. |
 | `TRANSCODE_TOKEN` | optional | Shared bearer token for source/output endpoints. Auto-generated per process if unset (set it for stability across restarts). |
+| `APP_ID` | optional | Tags each job's `metadata.app` for usage attribution (default `demo-ui`). |
 | `BODY_SIZE_LIMIT` | prod | adapter-node request body cap. The Dockerfile sets `Infinity` so large uploads work. |
 | `RUNPOD_EXECUTION_TIMEOUT_MS`, `RUNPOD_TTL_MS` | optional | Job policy overrides. |
+
+## Usage tracking
+
+Each job is tagged with `metadata: { app: APP_ID }` and the worker echoes it back. When a job completes,
+this server captures RunPod's `executionTime` (the **billed** compute ms) and `delayTime` (queue ms) from the
+job status and stores them on the video record (shown as "Compute (billed)" and "App" in the UI). To bill an
+app, sum `executionTimeMs` grouped by `metadata.app` over the period — no cost logic lives here; that's yours.
 
 ## Develop
 

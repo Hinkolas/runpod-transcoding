@@ -22,12 +22,19 @@ export function publicBaseUrl(requestUrl: URL): string {
 	return (env.PUBLIC_BASE_URL || requestUrl.origin).replace(/\/$/, '');
 }
 
+/** Identifies which app/customer a job belongs to, for usage attribution. */
+export function appId(): string {
+	return env.APP_ID || 'demo-ui';
+}
+
 /** Build the worker job `input` with HTTP source + destination pointing back here. */
 export function buildTranscodeInput(video: VideoRecord, baseUrl: string) {
 	if (!video.settings) throw new Error('Video has no transcode settings');
 	const auth = { Authorization: `Bearer ${workerToken()}` };
 	return {
 		appVideoId: video.id,
+		// Echoed back in the result so each job is attributable to an app.
+		metadata: { app: appId() },
 		source: {
 			type: 'http',
 			url: `${baseUrl}/api/files/${video.id}/source`,
@@ -90,9 +97,12 @@ export async function submitJob(video: VideoRecord, baseUrl: string): Promise<Su
 
 type RunpodStatusResponse = {
 	status?: string;
+	delayTime?: number; // ms spent queued (not billed)
+	executionTime?: number; // ms of compute RunPod bills for
 	output?: {
 		probe?: ProbeInfo;
 		durationMs?: number;
+		metadata?: Record<string, unknown>;
 		renditions?: { label: string; height: number; width: number | null; bandwidth: number }[];
 	};
 	error?: string;
@@ -125,6 +135,13 @@ export async function refreshJob(video: VideoRecord): Promise<void> {
 		return; // transient network error — try again next poll
 	}
 
+	// RunPod's own timing — `executionTime` is the billed compute, captured for
+	// usage attribution. Present on terminal states.
+	const timing = {
+		executionTimeMs: data.executionTime ?? null,
+		delayTimeMs: data.delayTime ?? null
+	};
+
 	const status = mapStatus(data.status || 'IN_PROGRESS');
 	if (status === 'ready') {
 		const renditionsOut: RenditionOutput[] | null =
@@ -138,12 +155,15 @@ export async function refreshJob(video: VideoRecord): Promise<void> {
 			status: 'ready',
 			probe: data.output?.probe ?? null,
 			durationMs: data.output?.durationMs ?? null,
-			renditionsOut
+			metadata: data.output?.metadata ?? null,
+			renditionsOut,
+			...timing
 		});
 	} else if (status === 'error') {
 		updateVideo(video.id, {
 			status: 'error',
-			error: data.error || `Job ${data.status?.toLowerCase() || 'failed'}`
+			error: data.error || `Job ${data.status?.toLowerCase() || 'failed'}`,
+			...timing
 		});
 	} else {
 		updateVideo(video.id, { status });

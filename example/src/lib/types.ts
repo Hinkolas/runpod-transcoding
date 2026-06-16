@@ -56,7 +56,10 @@ export type VideoRecord = {
 	settings: TranscodeSettings | null;
 	runpodJobId: string | null;
 	probe: ProbeInfo | null;
-	durationMs: number | null;
+	durationMs: number | null; // worker-measured encode wall time
+	executionTimeMs: number | null; // RunPod billed compute time (the usage number)
+	delayTimeMs: number | null; // RunPod queue wait (not billed)
+	metadata: Record<string, unknown> | null; // echoed job tags, e.g. { app }
 	renditionsOut: RenditionOutput[] | null;
 	error: string | null;
 	hasMaster: boolean;

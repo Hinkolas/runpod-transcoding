@@ -29,6 +29,9 @@ type InternalVideo = {
 	runpodJobId: string | null;
 	probe: ProbeInfo | null;
 	durationMs: number | null;
+	executionTimeMs: number | null;
+	delayTimeMs: number | null;
+	metadata: Record<string, unknown> | null;
 	renditionsOut: RenditionOutput[] | null;
 	error: string | null;
 	source: StoredFile | null;
@@ -74,6 +77,9 @@ function toPublic(video: InternalVideo): VideoRecord {
 		runpodJobId: video.runpodJobId,
 		probe: video.probe,
 		durationMs: video.durationMs,
+		executionTimeMs: video.executionTimeMs,
+		delayTimeMs: video.delayTimeMs,
+		metadata: video.metadata,
 		renditionsOut: video.renditionsOut,
 		error: video.error,
 		hasMaster: video.outputs.has('master.m3u8'),
@@ -105,6 +111,9 @@ export function createVideo(input: {
 		runpodJobId: null,
 		probe: null,
 		durationMs: null,
+		executionTimeMs: null,
+		delayTimeMs: null,
+		metadata: null,
 		renditionsOut: null,
 		error: null,
 		source: { bytes: input.bytes, contentType: input.contentType || 'video/mp4' },
@@ -138,6 +147,9 @@ type VideoMutation = Partial<
 		| 'runpodJobId'
 		| 'probe'
 		| 'durationMs'
+		| 'executionTimeMs'
+		| 'delayTimeMs'
+		| 'metadata'
 		| 'renditionsOut'
 		| 'error'
 		| 'lastPolledAt'
