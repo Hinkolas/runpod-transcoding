@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { VideoRecord } from '$lib/types';
+	import VideoLayout from './player/VideoLayout.svelte';
 
-	// Vidstack default-layout styles (SSR-safe — Vite extracts these to CSS).
-	import 'vidstack/player/styles/default/theme.css';
-	import 'vidstack/player/styles/default/layouts/video.css';
+	// Vidstack structural base styles for a custom layout (SSR-safe — Vite extracts
+	// these to CSS). The control-bar visuals live in our own components.
+	import 'vidstack/player/styles/base.css';
 
 	let { video }: { video: VideoRecord | null } = $props();
 
@@ -17,7 +18,6 @@
 	onMount(async () => {
 		await import('vidstack/player'); // <media-player>, <media-provider>, core
 		await import('vidstack/player/ui'); // controls, buttons, gestures, sliders, menus
-		await import('vidstack/player/layouts/default'); // <media-video-layout>
 		registered = true;
 	});
 
@@ -56,14 +56,18 @@
 		<media-player
 			bind:this={player}
 			class="w-full"
-			style="aspect-ratio: 16 / 9; --media-brand: #6366f1; --media-focus-ring-color: #818cf8;"
+			style="aspect-ratio: 16 / 9;"
 			{src}
 			poster={poster || undefined}
 			title={video?.title ?? ''}
 			playsInline
 		>
-			<media-provider></media-provider>
-			<media-video-layout thumbnails={thumbnails || null}></media-video-layout>
+			<media-provider>
+				<media-poster
+					class="absolute inset-0 z-0 block h-full w-full bg-black opacity-0 transition-opacity duration-200 data-[visible]:opacity-100 [&>img]:h-full [&>img]:w-full [&>img]:object-contain"
+				></media-poster>
+			</media-provider>
+			<VideoLayout thumbnails={thumbnails || null} />
 		</media-player>
 	{:else}
 		<div class="relative aspect-video bg-black">

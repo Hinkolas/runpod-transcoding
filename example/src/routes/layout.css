@@ -2,6 +2,17 @@
 @plugin '@tailwindcss/forms';
 @plugin '@tailwindcss/typography';
 
+/* Vidstack media-state variants for the custom player layout. These let utility
+   classes react to player state, e.g. `media-paused:block` shows an element only
+   while paused. (Equivalent to the subset of vidstack/tailwind.cjs we use, as
+   native Tailwind v4 custom variants.) */
+@custom-variant media-paused (media-player[data-paused] &);
+@custom-variant media-controls (media-player[data-controls] &);
+@custom-variant media-muted (media-player[data-muted] &);
+@custom-variant media-fullscreen (media-player[data-fullscreen] &);
+@custom-variant media-pip (media-player[data-pip] &);
+@custom-variant media-buffering (media-player[data-buffering] &);
+
 :root {
 	color-scheme: dark;
 }

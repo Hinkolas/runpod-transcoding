@@ -29,8 +29,10 @@ Browser ◀──play HLS── SvelteKit serves /api/files/:id/output/master.m3
   store in memory.
 - The browser polls `GET /api/videos` while jobs are in flight; the server lazily polls RunPod's job
   status and serves the HLS output to a [Vidstack](https://vidstack.io) player — adaptive playback via
-  [hls.js](https://github.com/video-dev/hls.js), with a built-in quality menu and seek-bar thumbnail
-  previews.
+  [hls.js](https://github.com/video-dev/hls.js). The player is a **custom control bar** built from
+  Vidstack's UI primitives (`src/lib/components/player/`) with [Lucide](https://lucide.dev) icons and
+  Tailwind styling: play/pause, volume, a seek bar with storyboard thumbnail previews, a quality menu
+  (from the HLS renditions) + playback speed, picture-in-picture, and fullscreen.
 
 > ⚠️ **Public reachability.** RunPod's cloud workers must be able to reach this server to download the
 > source and upload the output. Set `PUBLIC_BASE_URL` to a public URL. For local development, expose
