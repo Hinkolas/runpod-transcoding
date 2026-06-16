@@ -6,6 +6,8 @@ function contentTypeFor(path: string, fallback: string): string {
 	if (path.endsWith('.m3u8')) return 'application/vnd.apple.mpegurl';
 	if (path.endsWith('.ts')) return 'video/mp2t';
 	if (path.endsWith('.jpg') || path.endsWith('.jpeg')) return 'image/jpeg';
+	if (path.endsWith('.webp')) return 'image/webp'; // WebP storyboard sprites
+	if (path.endsWith('.vtt')) return 'text/vtt'; // scrub-thumbnail index
 	return fallback || 'application/octet-stream';
 }
 

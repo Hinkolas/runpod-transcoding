@@ -19,12 +19,27 @@ export type Rendition = {
 	preset?: string;
 };
 
+/** Scrub-thumbnail (storyboard) settings — mirrors the worker's `Thumbnails`.
+ * Set exactly one of `intervalSeconds` (one thumb every N seconds) or
+ * `targetCount` (~this many thumbs total). `null` on a video's settings means
+ * the feature is off and no storyboard is generated. */
+export type ThumbnailSettings = {
+	intervalSeconds?: number | null;
+	targetCount?: number | null;
+	width: number; // per-thumb width; height derives from the source aspect ratio
+	columns: number; // tiles per sprite-sheet row
+	rows: number; // tiles per sprite-sheet column (columns*rows per sheet)
+	format: 'jpeg' | 'webp';
+	quality: number; // 1–100, higher = better
+};
+
 /** Everything the user can tweak in the settings modal before encoding. */
 export type TranscodeSettings = {
 	renditions: Rendition[];
 	segmentSeconds: number;
 	allowUpscale: boolean;
 	threads: number;
+	thumbnails: ThumbnailSettings | null; // null = scrub thumbnails disabled
 };
 
 export type ProbeInfo = {
@@ -64,4 +79,5 @@ export type VideoRecord = {
 	error: string | null;
 	hasMaster: boolean;
 	posterReady: boolean;
+	storyboardReady: boolean; // scrub-thumbnail VTT was produced and uploaded
 };

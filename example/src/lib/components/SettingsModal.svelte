@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import type { Rendition, TranscodeSettings } from '$lib/types';
-	import { DEFAULT_SETTINGS, PRESETS, blankRendition } from '$lib/presets';
+	import type { Rendition, ThumbnailSettings, TranscodeSettings } from '$lib/types';
+	import { DEFAULT_SETTINGS, DEFAULT_THUMBNAILS, PRESETS, blankRendition } from '$lib/presets';
 
 	let {
 		open = false,
@@ -20,9 +20,36 @@
 	const modeOf = (s: TranscodeSettings): 'crf' | 'bitrate' =>
 		s.renditions[0]?.crf != null ? 'crf' : 'bitrate';
 
+	// Scrub-thumbnail working state. `thumbs` always carries both density values
+	// so toggling interval/count keeps the inputs populated; save() emits exactly
+	// one. `targetCount` defaults to 50 since DEFAULT_THUMBNAILS leaves it null.
+	type ThumbDraft = {
+		intervalSeconds: number;
+		targetCount: number;
+		width: number;
+		columns: number;
+		rows: number;
+		format: 'jpeg' | 'webp';
+		quality: number;
+	};
+	const thumbsModeOf = (s: TranscodeSettings): 'interval' | 'count' =>
+		s.thumbnails?.targetCount != null ? 'count' : 'interval';
+	const thumbDraftFrom = (s: TranscodeSettings): ThumbDraft => ({
+		intervalSeconds: s.thumbnails?.intervalSeconds ?? DEFAULT_THUMBNAILS.intervalSeconds ?? 5,
+		targetCount: s.thumbnails?.targetCount ?? 50,
+		width: s.thumbnails?.width ?? DEFAULT_THUMBNAILS.width,
+		columns: s.thumbnails?.columns ?? DEFAULT_THUMBNAILS.columns,
+		rows: s.thumbnails?.rows ?? DEFAULT_THUMBNAILS.rows,
+		format: s.thumbnails?.format ?? DEFAULT_THUMBNAILS.format,
+		quality: s.thumbnails?.quality ?? DEFAULT_THUMBNAILS.quality
+	});
+
 	let draft = $state<TranscodeSettings>(untrack(() => clone(settings)));
 	let mode = $state<'crf' | 'bitrate'>(untrack(() => modeOf(settings)));
 	let preset = $state<string>(untrack(() => settings.renditions[0]?.preset ?? 'medium'));
+	let thumbsEnabled = $state<boolean>(untrack(() => settings.thumbnails != null));
+	let thumbsMode = $state<'interval' | 'count'>(untrack(() => thumbsModeOf(settings)));
+	let thumbs = $state<ThumbDraft>(untrack(() => thumbDraftFrom(settings)));
 	let lastOpen = false;
 
 	// Reload the draft from the live settings each time the modal is opened.
@@ -31,6 +58,9 @@
 			draft = clone(settings);
 			mode = modeOf(settings);
 			preset = settings.renditions[0]?.preset ?? 'medium';
+			thumbsEnabled = settings.thumbnails != null;
+			thumbsMode = thumbsModeOf(settings);
+			thumbs = thumbDraftFrom(settings);
 		}
 		lastOpen = open;
 	});
@@ -65,6 +95,9 @@
 		draft = clone(DEFAULT_SETTINGS);
 		mode = modeOf(draft);
 		preset = draft.renditions[0]?.preset ?? 'medium';
+		thumbsEnabled = DEFAULT_SETTINGS.thumbnails != null;
+		thumbsMode = thumbsModeOf(DEFAULT_SETTINGS);
+		thumbs = thumbDraftFrom(DEFAULT_SETTINGS);
 	}
 	function save() {
 		// Emit exactly one rate-control field per rendition + the shared preset.
@@ -86,7 +119,21 @@
 			}
 			return base;
 		});
-		onsave({ ...draft, renditions });
+		// Emit the thumbnails block with exactly one density field set (or null when
+		// disabled, which tells the worker to skip storyboard generation).
+		const thumbnails: ThumbnailSettings | null = thumbsEnabled
+			? {
+					width: Number(thumbs.width),
+					columns: Number(thumbs.columns),
+					rows: Number(thumbs.rows),
+					format: thumbs.format,
+					quality: Number(thumbs.quality),
+					...(thumbsMode === 'interval'
+						? { intervalSeconds: Number(thumbs.intervalSeconds) }
+						: { targetCount: Number(thumbs.targetCount) })
+				}
+			: null;
+		onsave({ ...draft, renditions, thumbnails });
 		onclose();
 	}
 </script>
@@ -231,6 +278,106 @@
 						/>
 						<span class="text-base text-zinc-300">Allow upscaling</span>
 					</label>
+				</section>
+
+				<!-- Scrub thumbnails -->
+				<section>
+					<div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+						<div>
+							<h3 class="text-base font-medium text-zinc-200">Scrub thumbnails</h3>
+							<p class="mt-0.5 text-sm text-zinc-500">
+								Seek-bar preview images — storyboard sprites + WebVTT
+							</p>
+						</div>
+						<button
+							type="button"
+							role="switch"
+							aria-checked={thumbsEnabled}
+							onclick={() => (thumbsEnabled = !thumbsEnabled)}
+							aria-label="Generate scrub thumbnails"
+							class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition {thumbsEnabled
+								? 'bg-indigo-600'
+								: 'bg-zinc-700'}"
+						>
+							<span
+								class="inline-block h-5 w-5 transform rounded-full bg-white shadow transition {thumbsEnabled
+									? 'translate-x-[1.375rem]'
+									: 'translate-x-0.5'}"
+							></span>
+						</button>
+					</div>
+
+					{#if thumbsEnabled}
+						<div class="mb-3 inline-flex rounded-lg border border-zinc-700 p-0.5">
+							<button
+								type="button"
+								onclick={() => (thumbsMode = 'interval')}
+								class="rounded-md px-3 py-1 text-sm transition {thumbsMode === 'interval'
+									? 'bg-indigo-600 text-white'
+									: 'text-zinc-400 hover:text-zinc-200'}"
+							>
+								Every N seconds
+							</button>
+							<button
+								type="button"
+								onclick={() => (thumbsMode = 'count')}
+								class="rounded-md px-3 py-1 text-sm transition {thumbsMode === 'count'
+									? 'bg-indigo-600 text-white'
+									: 'text-zinc-400 hover:text-zinc-200'}"
+							>
+								Total count
+							</button>
+						</div>
+
+						<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+							{#if thumbsMode === 'interval'}
+								<label class="block">
+									<span class="mb-1.5 block text-sm text-zinc-400">Interval (seconds)</span>
+									<input class={field} type="number" min="0.5" step="0.5" bind:value={thumbs.intervalSeconds} />
+								</label>
+							{:else}
+								<label class="block">
+									<span class="mb-1.5 block text-sm text-zinc-400">Total thumbnails</span>
+									<input class={field} type="number" min="1" bind:value={thumbs.targetCount} />
+								</label>
+							{/if}
+							<label class="block">
+								<span class="mb-1.5 block text-sm text-zinc-400">Thumb width (px)</span>
+								<input class={field} type="number" min="16" bind:value={thumbs.width} />
+							</label>
+							<label class="block">
+								<span class="mb-1.5 block text-sm text-zinc-400">Format</span>
+								<select class={field} bind:value={thumbs.format}>
+									<option value="jpeg">JPEG</option>
+									<option value="webp">WebP</option>
+								</select>
+							</label>
+							<label class="block">
+								<span class="mb-1.5 block text-sm text-zinc-400">Sprite columns</span>
+								<input class={field} type="number" min="1" bind:value={thumbs.columns} />
+							</label>
+							<label class="block">
+								<span class="mb-1.5 block text-sm text-zinc-400">Sprite rows</span>
+								<input class={field} type="number" min="1" bind:value={thumbs.rows} />
+							</label>
+							<label class="block">
+								<span class="mb-1.5 block text-sm text-zinc-400">Quality (1–100)</span>
+								<input class={field} type="number" min="1" max="100" bind:value={thumbs.quality} />
+							</label>
+						</div>
+
+						<p class="mt-2 px-1 text-xs text-zinc-500">
+							{thumbsMode === 'interval'
+								? 'One thumbnail every N seconds — finer intervals scrub more smoothly but make larger sprites.'
+								: 'Roughly this many thumbnails spread across the whole video, regardless of its length.'}
+							Packed {thumbs.columns}×{thumbs.rows} per sprite sheet. WebP is smaller; JPEG is maximally
+							compatible. Higher quality = sharper previews and bigger files.
+						</p>
+					{:else}
+						<p class="px-1 text-sm text-zinc-500">
+							Disabled — no storyboard is generated and the player shows a plain seek bar.
+						</p>
+					{/if}
 				</section>
 			</div>
 

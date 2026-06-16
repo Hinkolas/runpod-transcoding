@@ -82,7 +82,8 @@ function toPublic(video: InternalVideo): VideoRecord {
 		renditionsOut: video.renditionsOut,
 		error: video.error,
 		hasMaster: video.outputs.has('master.m3u8'),
-		posterReady: video.outputs.has('poster.jpg')
+		posterReady: video.outputs.has('poster.jpg'),
+		storyboardReady: video.outputs.has('storyboard.vtt')
 	};
 }
 

@@ -48,7 +48,9 @@ export function buildTranscodeInput(video: VideoRecord, baseUrl: string, token: 
 		renditions: video.settings.renditions,
 		segmentSeconds: video.settings.segmentSeconds,
 		allowUpscale: video.settings.allowUpscale,
-		threads: video.settings.threads
+		threads: video.settings.threads,
+		// Opt-in scrub thumbnails. null (or absent) ⇒ the worker skips them.
+		thumbnails: video.settings.thumbnails ?? null
 	};
 }
 
