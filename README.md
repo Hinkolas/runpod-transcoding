@@ -22,8 +22,11 @@ ghcr.io/hinkolas/runpod-transcoding-worker:0.1     # latest patch of 0.1
 ghcr.io/hinkolas/runpod-transcoding-worker:latest  # latest release
 ```
 
-1. In the RunPod console → **Serverless → New Endpoint**, set the container image to
-   `ghcr.io/hinkolas/runpod-transcoding-worker:latest` (or pin a version).
+1. In the RunPod console → **Serverless → New Endpoint**, set the container image to a **pinned version**, e.g.
+   `ghcr.io/hinkolas/runpod-transcoding-worker:0.1.0`. Avoid `:latest` in production — it's mutable, so RunPod
+   may keep serving a cached older image and your deployments aren't reproducible. Pin a semver tag and bump it
+   deliberately to upgrade, or reference the image's `@sha256:…` digest for absolute reproducibility. See RunPod's
+   [image versioning guide](https://docs.runpod.io/serverless/workers/deploy#image-versioning).
 2. Pick a **CPU** worker (more vCPUs = faster parallel renditions).
 3. Optionally set `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` env vars if you want a default "house" S3 account
    (per-request credentials and the `http` backend need nothing).
