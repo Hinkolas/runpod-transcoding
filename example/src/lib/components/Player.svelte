@@ -15,8 +15,9 @@
 	let player = $state<HTMLElement | null>(null);
 
 	onMount(async () => {
-		await import('vidstack/player');
-		await import('vidstack/player/layouts/default');
+		await import('vidstack/player'); // <media-player>, <media-provider>, core
+		await import('vidstack/player/ui'); // controls, buttons, gestures, sliders, menus
+		await import('vidstack/player/layouts/default'); // <media-video-layout>
 		registered = true;
 	});
 
