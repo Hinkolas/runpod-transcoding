@@ -74,15 +74,18 @@ def encoder_args(rendition: Rendition) -> list[str]:
 
 
 def rate_control_args(rendition: Rendition) -> list[str]:
-    """CRF (constant quality) or -b:v (ABR), always capped by maxrate/bufsize.
+    """CRF (constant quality) or -b:v (ABR), with an optional maxrate/bufsize cap.
 
-    The schema guarantees exactly one of `crf` / `videoBitrate` is set.
+    The schema guarantees exactly one of `crf` / `videoBitrate` is set, and that
+    `maxrate`/`bufsize` are either both present or both absent.
     """
     if rendition.crf is not None:
         rate = ["-crf", str(rendition.crf)]
     else:
         rate = ["-b:v", str(rendition.videoBitrate)]
-    return [*rate, "-maxrate", rendition.maxrate, "-bufsize", rendition.bufsize]
+    if rendition.maxrate and rendition.bufsize:
+        rate += ["-maxrate", rendition.maxrate, "-bufsize", rendition.bufsize]
+    return rate
 
 
 def transcode_rendition(
@@ -91,6 +94,7 @@ def transcode_rendition(
     rendition: Rendition,
     segment_seconds: int,
     threads: int,
+    source_duration: float = 0.0,
 ) -> dict[str, Any]:
     variant_dir = output_dir / rendition.label
     variant_dir.mkdir(parents=True, exist_ok=True)
@@ -119,9 +123,16 @@ def transcode_rendition(
     ]
     run_command(command)
 
-    # HLS master playlists require a BANDWIDTH per variant. In CRF mode there is
-    # no target bitrate, so advertise the peak (maxrate) as the bandwidth estimate.
-    video_bps = bitrate_to_int(rendition.videoBitrate or rendition.maxrate)
+    # HLS master playlists require a BANDWIDTH per variant. Prefer the target
+    # bitrate, else the cap (maxrate); with neither (uncapped CRF) measure the
+    # actual encoded segments.
+    if rendition.videoBitrate:
+        video_bps = bitrate_to_int(rendition.videoBitrate)
+    elif rendition.maxrate:
+        video_bps = bitrate_to_int(rendition.maxrate)
+    else:
+        segment_bytes = sum(p.stat().st_size for p in variant_dir.glob("*.ts"))
+        video_bps = int(segment_bytes * 8 / source_duration) if source_duration else 0
     return {
         "label": rendition.label,
         "height": rendition.height,

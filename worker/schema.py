@@ -12,11 +12,24 @@ from typing import Annotated, Literal, Union
 from pydantic import BaseModel, Field, model_validator
 
 
+def _parse_bitrate(value: str) -> int:
+    """Parse an ffmpeg bitrate string ('2800k', '5M', '500000') to bits/sec; 0 if unparseable."""
+    text = value.strip().lower()
+    try:
+        if text.endswith("k"):
+            return int(float(text[:-1]) * 1000)
+        if text.endswith("m"):
+            return int(float(text[:-1]) * 1_000_000)
+        return int(float(text))
+    except ValueError:
+        return 0
+
+
 class Rendition(BaseModel):
     """A single output quality level.
 
-    Only `label`, `height`, `videoBitrate`, `maxrate` and `bufsize` are required;
-    everything else has a sensible default so a minimal request still works.
+    `label` and `height` are required, plus exactly one of `crf`/`videoBitrate`.
+    The `maxrate`/`bufsize` cap is optional. Everything else has a sensible default.
     """
 
     label: str
@@ -27,9 +40,9 @@ class Rendition(BaseModel):
     #   videoBitrate -> average bitrate (ABR; needed for strict bandwidth ladders)
     crf: int | None = Field(default=None, ge=0, le=51)
     videoBitrate: str | None = None
-    # Peak bitrate cap, applied in both modes (recommended for streaming).
-    maxrate: str
-    bufsize: str
+    # Optional peak bitrate cap (set both, or neither). Recommended for streaming.
+    maxrate: str | None = None
+    bufsize: str | None = None
     codec: Literal["h264", "h265"] = "h264"
     audioBitrate: str = "128k"
     # Encode tuning — all optional.
@@ -43,6 +56,14 @@ class Rendition(BaseModel):
     def _check_rate_control(self) -> "Rendition":
         if (self.crf is None) == (self.videoBitrate is None):
             raise ValueError("Set exactly one of 'crf' or 'videoBitrate' per rendition")
+        if (self.maxrate is None) != (self.bufsize is None):
+            raise ValueError("'maxrate' and 'bufsize' must be set together (or both omitted)")
+        if self.videoBitrate is not None and self.maxrate is not None:
+            target, cap = _parse_bitrate(self.videoBitrate), _parse_bitrate(self.maxrate)
+            if target and cap and cap < target:
+                raise ValueError(
+                    f"maxrate ({self.maxrate}) must be >= videoBitrate ({self.videoBitrate})"
+                )
         return self
 
 

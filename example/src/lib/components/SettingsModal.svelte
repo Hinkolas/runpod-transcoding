@@ -39,12 +39,19 @@
 		'w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-base text-zinc-100 focus:border-indigo-500 focus:ring-0 focus:outline-none';
 	const cols = 'grid-cols-[1.2fr_0.9fr_1fr_1fr_1fr_1fr_1fr_auto]';
 
+	// Double an ffmpeg bitrate string ("5000k" -> "10000k") for a default bufsize.
+	function doubleRate(value: string): string {
+		const match = value.trim().toLowerCase().match(/^([\d.]+)\s*([km]?)$/);
+		return match ? `${parseFloat(match[1]) * 2}${match[2]}` : value;
+	}
+
 	function setMode(next: 'crf' | 'bitrate') {
 		mode = next;
-		// Backfill the field the chosen mode needs so inputs aren't blank.
+		// Backfill the field the chosen mode needs so inputs aren't blank. For ABR,
+		// derive the target from the rung's own cap so it never exceeds maxrate.
 		for (const r of draft.renditions) {
 			if (next === 'crf' && r.crf == null) r.crf = 21;
-			if (next === 'bitrate' && !r.videoBitrate) r.videoBitrate = '2800k';
+			if (next === 'bitrate' && !r.videoBitrate) r.videoBitrate = r.maxrate || '2800k';
 		}
 		draft.renditions = [...draft.renditions];
 	}
@@ -61,19 +68,23 @@
 	}
 	function save() {
 		// Emit exactly one rate-control field per rendition + the shared preset.
+		// The maxrate/bufsize cap is optional; include it only when maxrate is set
+		// (deriving bufsize if the user left it blank) so the pair is always valid.
 		const renditions: Rendition[] = draft.renditions.map((r) => {
-			const base = {
+			const base: Rendition = {
 				label: r.label,
 				height: r.height,
-				maxrate: r.maxrate,
-				bufsize: r.bufsize,
 				codec: r.codec,
 				audioBitrate: r.audioBitrate,
 				preset
 			};
-			return mode === 'crf'
-				? { ...base, crf: Number(r.crf) }
-				: { ...base, videoBitrate: r.videoBitrate };
+			if (mode === 'crf') base.crf = Number(r.crf);
+			else base.videoBitrate = r.videoBitrate;
+			if (r.maxrate) {
+				base.maxrate = r.maxrate;
+				base.bufsize = r.bufsize || doubleRate(r.maxrate);
+			}
+			return base;
 		});
 		onsave({ ...draft, renditions });
 		onclose();
@@ -189,8 +200,8 @@
 
 					<p class="mt-2 px-1 text-xs text-zinc-500">
 						{mode === 'crf'
-							? 'Constant quality — lower CRF = higher quality + bigger files (~21 is the streaming sweet spot). Max rate caps the peak bitrate.'
-							: 'Target bitrate — fixed average bitrate per rung, capped by max rate.'}
+							? 'Constant quality — lower CRF = higher quality + bigger files (~21 is the streaming sweet spot). Max rate / Buf size are an optional peak cap (recommended for streaming).'
+							: 'Target bitrate — fixed average bitrate per rung. Max rate / Buf size are an optional cap; clear both for uncapped ABR (and keep max rate ≥ video bitrate when set).'}
 					</p>
 				</section>
 

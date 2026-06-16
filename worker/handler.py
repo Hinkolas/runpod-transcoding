@@ -76,7 +76,8 @@ def handle_transcode(job: dict[str, Any]) -> dict[str, Any]:
 
         def encode(rendition: Rendition) -> dict[str, Any]:
             variant = transcode.transcode_rendition(
-                source_path, output_dir, rendition, payload.segmentSeconds, per_job_threads
+                source_path, output_dir, rendition, payload.segmentSeconds, per_job_threads,
+                float(probe["durationSeconds"]),
             )
             variant["width"] = rendition.width or transcode.calculated_width(
                 int(probe["width"]), int(probe["height"]), rendition.height

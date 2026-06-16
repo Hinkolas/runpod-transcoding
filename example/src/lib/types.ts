@@ -12,8 +12,8 @@ export type Rendition = {
 	height: number;
 	crf?: number | null;
 	videoBitrate?: string | null;
-	maxrate: string;
-	bufsize: string;
+	maxrate?: string | null; // optional peak cap (pair with bufsize)
+	bufsize?: string | null;
 	codec: VideoCodec;
 	audioBitrate: string;
 	preset?: string;
