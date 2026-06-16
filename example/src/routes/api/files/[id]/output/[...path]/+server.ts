@@ -1,5 +1,5 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { getOutput, getVideo, putOutput } from '$lib/server/store';
+import { getOutput, getVideo, getVideoToken, putOutput } from '$lib/server/store';
 import { isAuthorized } from '$lib/server/auth';
 
 function contentTypeFor(path: string, fallback: string): string {
@@ -11,7 +11,9 @@ function contentTypeFor(path: string, fallback: string): string {
 
 /** The worker PUTs each HLS output file here (HTTP destination). Token-guarded. */
 export const PUT: RequestHandler = async ({ params, request }) => {
-	if (!isAuthorized(request)) return new Response('Unauthorized', { status: 401 });
+	if (!isAuthorized(request, getVideoToken(params.id!))) {
+		return new Response('Unauthorized', { status: 401 });
+	}
 	const id = params.id!;
 	if (!getVideo(id)) return new Response('Not found', { status: 404 });
 	const path = params.path!; // e.g. "720p/segment_00001.ts" or "master.m3u8"

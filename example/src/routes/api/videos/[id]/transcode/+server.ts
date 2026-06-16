@@ -18,6 +18,9 @@ export const POST: RequestHandler = async ({ params, request, url }) => {
 		return json({ message: 'At least one rendition is required' }, { status: 400 });
 	}
 
+	// Mint a fresh per-job token scoped to this video's source/output endpoints.
+	const token = crypto.randomUUID();
+
 	// Reset any prior run before queueing the new one.
 	clearOutputs(id);
 	updateVideo(id, {
@@ -27,17 +30,21 @@ export const POST: RequestHandler = async ({ params, request, url }) => {
 		runpodJobId: null,
 		renditionsOut: null,
 		durationMs: null,
-		probe: null
+		executionTimeMs: null,
+		delayTimeMs: null,
+		metadata: null,
+		probe: null,
+		token
 	});
 
 	try {
 		const video = getVideo(id)!; // now carries the new settings
-		const result = await submitJob(video, publicBaseUrl(url));
+		const result = await submitJob(video, publicBaseUrl(url), token);
 		const updated = updateVideo(id, { runpodJobId: result.id, status: result.status });
 		return json({ video: updated });
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Failed to submit job';
-		const updated = updateVideo(id, { status: 'error', error: message });
+		const updated = updateVideo(id, { status: 'error', error: message, token: null });
 		return json({ message, video: updated }, { status: 500 });
 	}
 };

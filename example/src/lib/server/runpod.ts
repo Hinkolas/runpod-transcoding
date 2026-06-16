@@ -5,7 +5,7 @@
 
 import { env } from '$env/dynamic/private';
 import type { ProbeInfo, RenditionOutput, VideoRecord, VideoStatus } from '$lib/types';
-import { updateVideo, workerToken } from '$lib/server/store';
+import { updateVideo } from '$lib/server/store';
 
 function requireEnv(name: string): string {
 	const value = env[name];
@@ -28,9 +28,9 @@ export function appId(): string {
 }
 
 /** Build the worker job `input` with HTTP source + destination pointing back here. */
-export function buildTranscodeInput(video: VideoRecord, baseUrl: string) {
+export function buildTranscodeInput(video: VideoRecord, baseUrl: string, token: string) {
 	if (!video.settings) throw new Error('Video has no transcode settings');
-	const auth = { Authorization: `Bearer ${workerToken()}` };
+	const auth = { Authorization: `Bearer ${token}` };
 	return {
 		appVideoId: video.id,
 		// Echoed back in the result so each job is attributable to an app.
@@ -71,7 +71,11 @@ function mapStatus(runpodStatus: string): VideoStatus {
 
 export type SubmitResult = { id: string; status: VideoStatus };
 
-export async function submitJob(video: VideoRecord, baseUrl: string): Promise<SubmitResult> {
+export async function submitJob(
+	video: VideoRecord,
+	baseUrl: string,
+	token: string
+): Promise<SubmitResult> {
 	const endpointId = requireEnv('RUNPOD_ENDPOINT_ID');
 	const apiKey = requireEnv('RUNPOD_API_KEY');
 	const executionTimeout = Number(env.RUNPOD_EXECUTION_TIMEOUT_MS || 3_600_000);
@@ -81,7 +85,7 @@ export async function submitJob(video: VideoRecord, baseUrl: string): Promise<Su
 		method: 'POST',
 		headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
 		body: JSON.stringify({
-			input: buildTranscodeInput(video, baseUrl),
+			input: buildTranscodeInput(video, baseUrl, token),
 			policy: { executionTimeout, ttl }
 		})
 	});
@@ -157,12 +161,14 @@ export async function refreshJob(video: VideoRecord): Promise<void> {
 			durationMs: data.output?.durationMs ?? null,
 			metadata: data.output?.metadata ?? null,
 			renditionsOut,
+			token: null, // job done — revoke the source/output capability
 			...timing
 		});
 	} else if (status === 'error') {
 		updateVideo(video.id, {
 			status: 'error',
 			error: data.error || `Job ${data.status?.toLowerCase() || 'failed'}`,
+			token: null,
 			...timing
 		});
 	} else {

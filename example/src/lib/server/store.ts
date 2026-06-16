@@ -1,11 +1,10 @@
 // In-memory state. No database — videos, their source bytes, the HLS output
-// files the worker uploads, and a per-process auth token all live in RAM. State
+// files the worker uploads, and a per-job auth token all live in RAM. State
 // is held on `globalThis` so it survives Vite HMR reloads during development.
 //
 // This is intentionally simple for a demo: everything is lost on restart, and
 // large files are buffered in memory.
 
-import { env } from '$env/dynamic/private';
 import type {
 	ProbeInfo,
 	RenditionOutput,
@@ -34,6 +33,10 @@ type InternalVideo = {
 	metadata: Record<string, unknown> | null;
 	renditionsOut: RenditionOutput[] | null;
 	error: string | null;
+	// Per-job bearer token: minted when a transcode is submitted, scoped to this
+	// video's source/output endpoints, and revoked when the job finishes. Secret —
+	// never serialized to the browser.
+	token: string | null;
 	source: StoredFile | null;
 	outputs: Map<string, StoredFile>;
 	lastPolledAt: number;
@@ -41,26 +44,22 @@ type InternalVideo = {
 
 type Store = {
 	videos: Map<string, InternalVideo>;
-	token: string;
 };
 
 const globalRef = globalThis as unknown as { __transcodeStore?: Store };
 
 function getStore(): Store {
 	if (!globalRef.__transcodeStore) {
-		globalRef.__transcodeStore = {
-			videos: new Map(),
-			token: env.TRANSCODE_TOKEN || crypto.randomUUID()
-		};
+		globalRef.__transcodeStore = { videos: new Map() };
 	}
 	return globalRef.__transcodeStore;
 }
 
 const store = getStore();
 
-/** Shared secret the server hands to the worker and validates on callbacks. */
-export function workerToken(): string {
-	return store.token;
+/** The per-job token for a video, for validating source/output requests. */
+export function getVideoToken(id: string): string | null {
+	return store.videos.get(id)?.token ?? null;
 }
 
 function toPublic(video: InternalVideo): VideoRecord {
@@ -116,6 +115,7 @@ export function createVideo(input: {
 		metadata: null,
 		renditionsOut: null,
 		error: null,
+		token: null,
 		source: { bytes: input.bytes, contentType: input.contentType || 'video/mp4' },
 		outputs: new Map(),
 		lastPolledAt: 0
@@ -152,6 +152,7 @@ type VideoMutation = Partial<
 		| 'metadata'
 		| 'renditionsOut'
 		| 'error'
+		| 'token'
 		| 'lastPolledAt'
 	>
 >;

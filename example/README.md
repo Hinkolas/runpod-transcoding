@@ -22,7 +22,8 @@ Browser ◀──play HLS── SvelteKit serves /api/files/:id/output/master.m3
 
 - **Upload** (`POST /api/videos`) buffers the source video in memory.
 - **Encode** (`POST /api/videos/:id/transcode`) submits a RunPod job whose `source`/`destination` are
-  `http` URLs pointing back here, signed with a per-process bearer token.
+  `http` URLs pointing back here, with a freshly minted **per-job bearer token** (scoped to that one video,
+  revoked when the job finishes) in the request headers.
 - The worker downloads the source, encodes, and PUTs every output file (playlists, segments, poster)
   back to `/api/files/:id/output/...`, which we store in memory.
 - The browser polls `GET /api/videos` while jobs are in flight; the server lazily polls RunPod's job
@@ -42,7 +43,6 @@ Environment variables (all read at runtime):
 | `RUNPOD_API_KEY` | yes | RunPod API key used to submit/poll jobs. |
 | `RUNPOD_ENDPOINT_ID` | yes | The serverless endpoint running `worker/`. |
 | `PUBLIC_BASE_URL` | recommended | Publicly reachable base URL of *this* server (no trailing slash). Falls back to the request origin. |
-| `TRANSCODE_TOKEN` | optional | Shared bearer token for source/output endpoints. Auto-generated per process if unset (set it for stability across restarts). |
 | `APP_ID` | optional | Tags each job's `metadata.app` for usage attribution (default `demo-ui`). |
 | `BODY_SIZE_LIMIT` | prod | adapter-node request body cap. The Dockerfile sets `Infinity` so large uploads work. |
 | `RUNPOD_EXECUTION_TIMEOUT_MS`, `RUNPOD_TTL_MS` | optional | Job policy overrides. |
@@ -79,6 +79,7 @@ docker run --rm -p 3000:3000 \
 
 - All state is in RAM — restarting the server loses uploaded videos and outputs.
 - Files are buffered fully in memory; there's a 2 GiB per-upload cap.
-- Output GET endpoints are unauthenticated (random UUID paths); the source GET and all output PUTs
-  require the bearer token.
+- Output GET endpoints are unauthenticated (random UUID paths) so the browser's player can fetch them;
+  the source GET and all output PUTs require the job's per-job bearer token (scoped to that one video,
+  revoked once the job completes).
 - Encoding settings are stored per-browser in `localStorage`.
