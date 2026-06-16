@@ -11,7 +11,7 @@ files on its local filesystem). No per-bucket configuration is baked into the wo
 
 - **CPU-only** encoding (libx264 / libx265). Runs on cheap RunPod CPU endpoints.
 - Each rendition encodes in its own ffmpeg process, in parallel — auto-tuned to the box's core count.
-- Output: `master.m3u8` + `<label>/index.m3u8` + `<label>/segment_00000.ts …` per rendition + `poster.jpg`.
+- Output: `master.m3u8` + `<label>/index.m3u8` + `<label>/segment_00000.ts …` per rendition + `poster.jpg`, plus **optional** scrub thumbnails (`storyboard.vtt` + `storyboard_000.<jpg|webp>`).
 
 ---
 
@@ -27,6 +27,7 @@ The RunPod job body is `{ "input": <TranscodeInput> }`.
 | `source` | [`Source`](#source-download) | — | Where to download the source video from. |
 | `destination` | [`Destination`](#destination-upload) | — | Where to upload the HLS output to. |
 | `renditions` | [`Rendition`](#rendition)[] | — | At least one. Quality levels to produce. |
+| `thumbnails` | [`Thumbnails`](#thumbnails) | `null` | Opt-in scrub thumbnails (storyboard sprites + WebVTT). Omit ⇒ none generated. |
 | `allowUpscale` | bool | `false` | If false, renditions taller than the source are dropped (smallest kept as a floor). |
 | `segmentSeconds` | int (2–20) | `6` | HLS segment length. Keyframes are aligned to this. |
 | `threads` | int | `0` | ffmpeg threads per encode. `0` = auto-tune to CPU count. |
@@ -58,6 +59,24 @@ Set **exactly one** of `crf` or `videoBitrate` for rate control (see [Rate contr
 - **CRF (recommended for VOD)** — set `crf` (e.g. `21`), omit `videoBitrate`. The encoder spends the bits each scene needs for constant quality; `maxrate`/`bufsize` cap the peak so a complex scene can't exceed a viewer's bandwidth. Best quality-per-byte.
 - **ABR** — set `videoBitrate` (e.g. `"2800k"`), omit `crf`, for a fixed average-bitrate ladder.
 - Pair either with a slower `preset` (`medium`/`slow`): you encode once and serve many times, so the extra encode time buys smaller files forever.
+
+### `Thumbnails`
+
+Opt-in **scrub thumbnails** — the preview frames a player shows when hovering the seek bar. When present, the worker samples frames across the source, packs them into **sprite-sheet** mosaics, and writes a **WebVTT** index (`storyboard.vtt`) that maps each timestamp to a crop region of a sprite (`storyboard_000.jpg#xywh=x,y,w,h`). Every thumbnail-aware web player (Vidstack, Plyr, video.js, …) consumes this format. Omit the whole object ⇒ no thumbnails are generated.
+
+Set **exactly one** of `intervalSeconds` / `targetCount` for density.
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `intervalSeconds` | float | `null` | One thumbnail every N seconds. Set this **or** `targetCount`. |
+| `targetCount` | int | `null` | Aim for ~this many thumbnails total (the interval is derived from duration). Set this **or** `intervalSeconds`. |
+| `width` | int | `240` | Per-thumbnail width in px; height is derived from the source aspect ratio (rounded to even). |
+| `columns` | int | `5` | Thumbnails per sprite row. |
+| `rows` | int | `5` | Thumbnails per sprite column. `columns × rows` = thumbnails per sprite sheet. |
+| `format` | `"jpeg"` \| `"webp"` | `"jpeg"` | Sprite image format. webp is ~25–30% smaller at equal quality (needs an ffmpeg built with libwebp — the provided image is). |
+| `quality` | int 1–100 | `75` | Normalized quality, higher = better (mapped to mjpeg `-q:v` for jpeg, libwebp `-quality` for webp). |
+
+Generation is **best-effort**: if it fails (or the source reports no duration), the job still succeeds and the storyboard fields come back `null`. It runs concurrently with the rendition encodes, so it adds little wall-clock on a multi-core box. Note that native `<video controls>` and hls.js don't render thumbnails — point a thumbnail-aware player at `storyboard.vtt` to display them.
 
 ### `Source` (download)
 
@@ -164,7 +183,8 @@ filesystem). Auth is whatever you put in `headers`:
 
 For the HTTP destination, your endpoint receives a `PUT` for each file. Reconstruct the tree from the path,
 e.g. `PUT /api/transcode-output/video-123/720p/index.m3u8`, then `…/720p/segment_00000.ts`, and finally
-`…/master.m3u8` and `…/poster.jpg`. Stream the request body to disk and return `2xx`.
+`…/master.m3u8`, `…/poster.jpg`, and — if `thumbnails` was requested — `…/storyboard.vtt` + `…/storyboard_000.jpg`.
+Stream the request body to disk and return `2xx`.
 
 ---
 
@@ -185,6 +205,12 @@ e.g. `PUT /api/transcode-output/video-123/720p/index.m3u8`, then `…/720p/segme
       "bandwidth": 2928000, "playlistFile": "720p/index.m3u8", "segmentPrefix": "720p",
       "location": "outputs/video-123/720p/index.m3u8" }
   ],
+  "storyboard": {                          // null unless `thumbnails` was requested (or if it failed)
+    "interval": 5.0, "thumbWidth": 240, "thumbHeight": 136,
+    "columns": 5, "rows": 5, "format": "jpeg",
+    "thumbnailCount": 12, "spriteCount": 1, "vttFile": "storyboard.vtt",
+    "location": "outputs/video-123/storyboard.vtt"
+  },
   "probe": { "width": 1920, "height": 1080, "durationSeconds": 60.0, "codec": "h264", "bitrate": 5000000 },
   "uploadedObjectCount": 23,
   "encoder": "libx264/libx265 (cpu)",
@@ -193,15 +219,19 @@ e.g. `PUT /api/transcode-output/video-123/720p/index.m3u8`, then `…/720p/segme
 
   // s3 destination:
   "masterPlaylistKey": "outputs/video-123/master.m3u8",
-  "posterKey": "outputs/video-123/poster.jpg"
+  "posterKey": "outputs/video-123/poster.jpg",
+  "storyboardVttKey": "outputs/video-123/storyboard.vtt"
   // http destination instead carries:
   // "masterPlaylistUrl": "https://…/master.m3u8",
-  // "posterUrl": "https://…/poster.jpg"
+  // "posterUrl": "https://…/poster.jpg",
+  // "storyboardVttUrl": "https://…/storyboard.vtt"
 }
 ```
 
 `location` is the S3 key for an `s3` destination, or the absolute URL for an `http` destination. `posterKey` /
-`posterUrl` is `null` if poster extraction failed (it is best-effort and never fails the job).
+`posterUrl` is `null` if poster extraction failed (it is best-effort and never fails the job). `storyboardVttKey` /
+`storyboardVttUrl` (and the `storyboard` block) are `null` unless `thumbnails` was requested, and `null` if
+generation failed (also best-effort).
 
 ---
 

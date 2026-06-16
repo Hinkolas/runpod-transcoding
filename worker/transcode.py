@@ -9,12 +9,13 @@ than relying on a single libx264 encode's internal threading.
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 from pathlib import Path
 from typing import Any
 
-from schema import Rendition
+from schema import Rendition, Thumbnails
 
 
 def run_command(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -159,6 +160,113 @@ def extract_poster(source: Path, output_dir: Path, duration: float) -> Path | No
         return poster_path if poster_path.exists() else None
     except Exception as error:  # poster is best-effort; never fail the job for it
         print(f"poster extraction failed: {error}", flush=True)
+        return None
+
+
+def _format_timestamp(seconds: float) -> str:
+    """Seconds -> WebVTT 'HH:MM:SS.mmm'."""
+    total_ms = max(0, int(round(seconds * 1000)))
+    hours, rem = divmod(total_ms, 3_600_000)
+    minutes, rem = divmod(rem, 60_000)
+    secs, millis = divmod(rem, 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
+
+
+def _thumb_quality_args(settings: Thumbnails) -> list[str]:
+    """Map the normalized 1-100 quality (higher = better) onto the chosen encoder."""
+    if settings.format == "webp":
+        return ["-c:v", "libwebp", "-quality", str(settings.quality)]
+    # mjpeg -q:v is 2 (best) .. 31 (worst) — invert the normalized scale.
+    qv = round(2 + (31 - 2) * (100 - settings.quality) / 99)
+    return ["-c:v", "mjpeg", "-q:v", str(qv)]
+
+
+def extract_storyboard(
+    source: Path,
+    output_dir: Path,
+    settings: Thumbnails,
+    src_width: int,
+    src_height: int,
+    duration: float,
+) -> dict[str, Any] | None:
+    """Best-effort scrub thumbnails: sprite-sheet mosaics + a WebVTT index.
+
+    Samples one frame every `interval` seconds, scales each to the requested width
+    (height derived from the source aspect ratio), and tiles them into
+    `columns x rows` mosaics. `storyboard.vtt` maps each timestamp to a crop region
+    of a sprite. Mirrors extract_poster — never raises; on any failure it logs and
+    returns None so the job still succeeds.
+    """
+    try:
+        if duration <= 0 or src_width <= 0 or src_height <= 0:
+            print("storyboard skipped: missing source duration/dimensions", flush=True)
+            return None
+
+        interval = (
+            settings.intervalSeconds
+            if settings.intervalSeconds is not None
+            else duration / settings.targetCount
+        )
+        if interval <= 0:
+            return None
+        count = max(1, math.ceil(duration / interval))
+
+        thumb_w = settings.width + (settings.width % 2)
+        thumb_h = round(thumb_w * src_height / src_width)
+        thumb_h += thumb_h % 2  # mjpeg/libwebp want even dimensions
+
+        ext = "webp" if settings.format == "webp" else "jpg"
+        cols, rows = settings.columns, settings.rows
+        tiles_per_sheet = cols * rows
+        rate = 1.0 / interval
+
+        run_command(
+            [
+                "ffmpeg", "-y", "-i", str(source),
+                "-vf", f"fps={rate:.6f},scale={thumb_w}:{thumb_h},tile={cols}x{rows}",
+                "-an",
+                *_thumb_quality_args(settings),
+                # image2 muxer numbers from 1 by default; the VTT references sheets
+                # from 0, so pin the first sprite to storyboard_000.
+                "-start_number", "0",
+                str(output_dir / f"storyboard_%03d.{ext}"),
+            ]
+        )
+
+        sheets = sorted(output_dir.glob(f"storyboard_*.{ext}"))
+        if not sheets:
+            print("storyboard produced no sprites", flush=True)
+            return None
+        # Never reference a sprite file that wasn't written; a trailing cue may at
+        # worst land on a padding tile of the last (partial) sheet.
+        cues = min(count, len(sheets) * tiles_per_sheet)
+
+        lines = ["WEBVTT", ""]
+        for i in range(cues):
+            sheet, pos = divmod(i, tiles_per_sheet)
+            x = (pos % cols) * thumb_w
+            y = (pos // cols) * thumb_h
+            lines.append(
+                f"{_format_timestamp(i * interval)} --> "
+                f"{_format_timestamp(min((i + 1) * interval, duration))}"
+            )
+            lines.append(f"storyboard_{sheet:03d}.{ext}#xywh={x},{y},{thumb_w},{thumb_h}")
+            lines.append("")
+        (output_dir / "storyboard.vtt").write_text("\n".join(lines), encoding="utf-8")
+
+        return {
+            "interval": round(interval, 3),
+            "thumbWidth": thumb_w,
+            "thumbHeight": thumb_h,
+            "columns": cols,
+            "rows": rows,
+            "format": settings.format,
+            "thumbnailCount": cues,
+            "spriteCount": len(sheets),
+            "vttFile": "storyboard.vtt",
+        }
+    except Exception as error:  # storyboard is best-effort; never fail the job for it
+        print(f"storyboard extraction failed: {error}", flush=True)
         return None
 
 

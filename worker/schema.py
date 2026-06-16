@@ -67,6 +67,40 @@ class Rendition(BaseModel):
         return self
 
 
+# --- Scrub thumbnails (storyboard sprites + WebVTT) -----------------------------
+
+
+class Thumbnails(BaseModel):
+    """Opt-in scrub-thumbnail (storyboard) settings.
+
+    When present on the job input, the worker samples frames across the source and
+    packs them into sprite-sheet mosaics plus a WebVTT index that maps each timestamp
+    to a crop region (`storyboard_000.<ext>#xywh=x,y,w,h`) — the format every
+    thumbnail-aware web player consumes. Omit the whole object to disable.
+
+    Density is `intervalSeconds` OR `targetCount` (exactly one). Per-thumb height is
+    derived from the source aspect ratio, so only `width` is configurable.
+    """
+
+    # Density — set EXACTLY ONE:
+    intervalSeconds: float | None = Field(default=None, gt=0)  # one thumb every N seconds
+    targetCount: int | None = Field(default=None, gt=0)        # ~this many thumbs total
+    width: int = Field(default=240, gt=0)        # per-thumb width; height auto from aspect
+    columns: int = Field(default=5, gt=0)        # tiles per sprite row
+    rows: int = Field(default=5, gt=0)           # tiles per sprite column (cols*rows per sheet)
+    format: Literal["jpeg", "webp"] = "jpeg"
+    # Normalized quality, higher = better. Mapped per encoder in transcode.py:
+    #   webp -> libwebp -quality (0-100, higher better) -> passed through
+    #   jpeg -> mjpeg   -q:v     (2 best .. 31 worst)   -> inverted
+    quality: int = Field(default=75, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def _check_density(self) -> "Thumbnails":
+        if (self.intervalSeconds is None) == (self.targetCount is None):
+            raise ValueError("Set exactly one of 'intervalSeconds' or 'targetCount'")
+        return self
+
+
 # --- Source (download) backends -------------------------------------------------
 
 
@@ -119,6 +153,8 @@ class TranscodeInput(BaseModel):
     source: Source
     destination: Destination
     renditions: list[Rendition] = Field(min_length=1)
+    # Opt-in scrub thumbnails. None => no storyboard is generated.
+    thumbnails: Thumbnails | None = None
     allowUpscale: bool = False
     segmentSeconds: int = Field(default=6, ge=2, le=20)
     threads: int = Field(default=0, ge=0)  # 0 => auto-tune to CPU count

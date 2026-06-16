@@ -58,6 +58,10 @@ def content_type_for(path: Path) -> str | None:
         return "application/vnd.apple.mpegurl"
     if path.suffix == ".ts":
         return "video/mp2t"
+    if path.suffix == ".vtt":  # storyboard index; not reliably in the mimetypes db
+        return "text/vtt"
+    if path.suffix == ".webp":
+        return "image/webp"
     return mimetypes.guess_type(path.name)[0]
 
 

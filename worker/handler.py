@@ -84,8 +84,26 @@ def handle_transcode(job: dict[str, Any]) -> dict[str, Any]:
             )
             return variant
 
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            variants = list(pool.map(encode, selected))
+        # The storyboard is a full decode pass; run it alongside the encodes (its own
+        # pool slot, so it overlaps their wall-clock instead of stealing an encoder).
+        want_storyboard = payload.thumbnails is not None
+        storyboard: dict[str, Any] | None = None
+        pool_size = max_workers + (1 if want_storyboard else 0)
+        with ThreadPoolExecutor(max_workers=pool_size) as pool:
+            encode_futures = [pool.submit(encode, rendition) for rendition in selected]
+            storyboard_future = (
+                pool.submit(
+                    transcode.extract_storyboard,
+                    source_path, output_dir, payload.thumbnails,
+                    int(probe["width"]), int(probe["height"]),
+                    float(probe["durationSeconds"]),
+                )
+                if want_storyboard
+                else None
+            )
+            variants = [future.result() for future in encode_futures]
+            if storyboard_future is not None:
+                storyboard = storyboard_future.result()
 
         transcode.write_master_playlist(output_dir, variants)
 
@@ -97,6 +115,9 @@ def handle_transcode(job: dict[str, Any]) -> dict[str, Any]:
     locations = {item.relativePath: item.location for item in stored}
     master_location = locations.get("master.m3u8")
     poster_location = locations.get("poster.jpg") if poster_path else None
+    storyboard_location = locations.get("storyboard.vtt") if storyboard else None
+    if storyboard:
+        storyboard = {**storyboard, "location": storyboard_location}
 
     rendition_outputs = [
         {**variant, "location": locations.get(variant["playlistFile"])}
@@ -111,6 +132,7 @@ def handle_transcode(job: dict[str, Any]) -> dict[str, Any]:
             {"relativePath": item.relativePath, "location": item.location} for item in stored
         ],
         "renditions": rendition_outputs,
+        "storyboard": storyboard,
         "probe": probe,
         "uploadedObjectCount": len(stored),
         "encoder": "libx264/libx265 (cpu)",
@@ -122,9 +144,11 @@ def handle_transcode(job: dict[str, Any]) -> dict[str, Any]:
     if payload.destination.type == "s3":
         response["masterPlaylistKey"] = master_location
         response["posterKey"] = poster_location
+        response["storyboardVttKey"] = storyboard_location
     else:
         response["masterPlaylistUrl"] = master_location
         response["posterUrl"] = poster_location
+        response["storyboardVttUrl"] = storyboard_location
 
     return response
 
