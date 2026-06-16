@@ -33,23 +33,30 @@ The RunPod job body is `{ "input": <TranscodeInput> }`.
 
 ### `Rendition`
 
-Only the first five fields are required; the rest have sensible defaults, so a minimal rendition works.
+Set **exactly one** of `crf` or `videoBitrate` for rate control (see [Rate control](#rate-control)); `maxrate`/`bufsize` are always applied as a peak cap. Everything else has a sensible default.
 
 | Field | Type | Default | ffmpeg |
 |-------|------|---------|--------|
 | `label` | string | — | Output subdirectory name, e.g. `"720p"`. |
 | `height` | int | — | Target height; width is derived from aspect ratio (`scale=-2:height`). |
 | `width` | int | `null` | Optional explicit width (otherwise computed). |
-| `videoBitrate` | string | — | `-b:v`, e.g. `"2800k"`. |
-| `maxrate` | string | — | `-maxrate`, e.g. `"2996k"`. |
-| `bufsize` | string | — | `-bufsize`, e.g. `"4200k"`. |
+| `crf` | int 0–51 | `null` | `-crf` constant-quality target. Set this **or** `videoBitrate`. |
+| `videoBitrate` | string | `null` | `-b:v` average bitrate (ABR). Set this **or** `crf`. |
+| `maxrate` | string | — | `-maxrate` peak cap, e.g. `"5000k"`. |
+| `bufsize` | string | — | `-bufsize`, e.g. `"10000k"`. |
 | `codec` | `"h264"` \| `"h265"` | `"h264"` | h264 is the universal browser/native default. |
 | `audioBitrate` | string | `"128k"` | `-b:a`. |
-| `preset` | string | `"veryfast"` | `-preset`. |
+| `preset` | string | `"veryfast"` | `-preset` — slower = smaller files at the same quality; use `medium`/`slow` for VOD. |
 | `pixelFormat` | string | `"yuv420p"` | `-pix_fmt`. |
 | `audioCodec` | string | `"aac"` | `-c:a`. |
 | `audioSampleRate` | int | `48000` | `-ar`. |
 | `audioChannels` | int | `2` | `-ac`. |
+
+#### Rate control
+
+- **CRF (recommended for VOD)** — set `crf` (e.g. `21`), omit `videoBitrate`. The encoder spends the bits each scene needs for constant quality; `maxrate`/`bufsize` cap the peak so a complex scene can't exceed a viewer's bandwidth. Best quality-per-byte.
+- **ABR** — set `videoBitrate` (e.g. `"2800k"`), omit `crf`, for a fixed average-bitrate ladder.
+- Pair either with a slower `preset` (`medium`/`slow`): you encode once and serve many times, so the extra encode time buys smaller files forever.
 
 ### `Source` (download)
 
@@ -124,9 +131,9 @@ filesystem). Auth is whatever you put in `headers`:
       "region": "fsn1"
     },
     "renditions": [
-      { "label": "480p",  "height": 480,  "videoBitrate": "1400k", "maxrate": "1498k", "bufsize": "2100k" },
-      { "label": "720p",  "height": 720,  "videoBitrate": "2800k", "maxrate": "2996k", "bufsize": "4200k" },
-      { "label": "1080p", "height": 1080, "videoBitrate": "5000k", "maxrate": "5350k", "bufsize": "7500k", "audioBitrate": "192k" }
+      { "label": "480p",  "height": 480,  "crf": 22, "maxrate": "1400k", "bufsize": "2800k",  "preset": "medium" },
+      { "label": "720p",  "height": 720,  "crf": 21, "maxrate": "2800k", "bufsize": "5600k",  "preset": "medium" },
+      { "label": "1080p", "height": 1080, "crf": 21, "maxrate": "5000k", "bufsize": "10000k", "preset": "medium", "audioBitrate": "192k" }
     ]
   }
 }
@@ -148,7 +155,7 @@ filesystem). Auth is whatever you put in `headers`:
       "headers": { "Authorization": "Bearer SHARED_SECRET" }
     },
     "renditions": [
-      { "label": "720p", "height": 720, "videoBitrate": "2800k", "maxrate": "2996k", "bufsize": "4200k" }
+      { "label": "720p", "height": 720, "crf": 21, "maxrate": "2800k", "bufsize": "5600k", "preset": "medium" }
     ]
   }
 }

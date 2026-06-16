@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Rendition(BaseModel):
@@ -22,7 +22,12 @@ class Rendition(BaseModel):
     label: str
     height: int = Field(gt=0)
     width: int | None = Field(default=None, gt=0)
-    videoBitrate: str
+    # Rate control — set EXACTLY ONE of:
+    #   crf          -> constant quality (best quality-per-byte; recommended for VOD)
+    #   videoBitrate -> average bitrate (ABR; needed for strict bandwidth ladders)
+    crf: int | None = Field(default=None, ge=0, le=51)
+    videoBitrate: str | None = None
+    # Peak bitrate cap, applied in both modes (recommended for streaming).
     maxrate: str
     bufsize: str
     codec: Literal["h264", "h265"] = "h264"
@@ -33,6 +38,12 @@ class Rendition(BaseModel):
     audioCodec: str = "aac"           # ffmpeg -c:a
     audioSampleRate: int = Field(default=48000, gt=0)  # ffmpeg -ar
     audioChannels: int = Field(default=2, gt=0)        # ffmpeg -ac
+
+    @model_validator(mode="after")
+    def _check_rate_control(self) -> "Rendition":
+        if (self.crf is None) == (self.videoBitrate is None):
+            raise ValueError("Set exactly one of 'crf' or 'videoBitrate' per rendition")
+        return self
 
 
 # --- Source (download) backends -------------------------------------------------

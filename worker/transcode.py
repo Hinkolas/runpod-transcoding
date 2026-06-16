@@ -73,6 +73,18 @@ def encoder_args(rendition: Rendition) -> list[str]:
     return ["-c:v", "libx264", "-preset", rendition.preset, "-profile:v", "high", "-level", "4.1"]
 
 
+def rate_control_args(rendition: Rendition) -> list[str]:
+    """CRF (constant quality) or -b:v (ABR), always capped by maxrate/bufsize.
+
+    The schema guarantees exactly one of `crf` / `videoBitrate` is set.
+    """
+    if rendition.crf is not None:
+        rate = ["-crf", str(rendition.crf)]
+    else:
+        rate = ["-b:v", str(rendition.videoBitrate)]
+    return [*rate, "-maxrate", rendition.maxrate, "-bufsize", rendition.bufsize]
+
+
 def transcode_rendition(
     source: Path,
     output_dir: Path,
@@ -91,9 +103,7 @@ def transcode_rendition(
         *encoder_args(rendition),
         "-threads", str(threads),
         "-pix_fmt", rendition.pixelFormat,
-        "-b:v", rendition.videoBitrate,
-        "-maxrate", rendition.maxrate,
-        "-bufsize", rendition.bufsize,
+        *rate_control_args(rendition),
         # Align GOP boundaries to segment length for clean ABR switching.
         "-force_key_frames", f"expr:gte(t,n_forced*{segment_seconds})",
         "-sc_threshold", "0",
@@ -109,13 +119,17 @@ def transcode_rendition(
     ]
     run_command(command)
 
+    # HLS master playlists require a BANDWIDTH per variant. In CRF mode there is
+    # no target bitrate, so advertise the peak (maxrate) as the bandwidth estimate.
+    video_bps = bitrate_to_int(rendition.videoBitrate or rendition.maxrate)
     return {
         "label": rendition.label,
         "height": rendition.height,
         "width": rendition.width,
+        "crf": rendition.crf,
         "videoBitrate": rendition.videoBitrate,
         "audioBitrate": rendition.audioBitrate,
-        "bandwidth": bitrate_to_int(rendition.videoBitrate) + bitrate_to_int(rendition.audioBitrate),
+        "bandwidth": video_bps + bitrate_to_int(rendition.audioBitrate),
         "playlistFile": f"{rendition.label}/index.m3u8",
         "segmentPrefix": rendition.label,
     }
