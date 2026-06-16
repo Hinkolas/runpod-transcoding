@@ -7,7 +7,7 @@ and every quality rendition — including audio settings — is fully configurab
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Union
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -122,3 +122,6 @@ class TranscodeInput(BaseModel):
     allowUpscale: bool = False
     segmentSeconds: int = Field(default=6, ge=2, le=20)
     threads: int = Field(default=0, ge=0)  # 0 => auto-tune to CPU count
+    # Free-form passthrough, echoed verbatim in the response. Use it to tag a job
+    # for usage attribution, e.g. {"app": "app-a", ...}.
+    metadata: dict[str, Any] = Field(default_factory=dict)

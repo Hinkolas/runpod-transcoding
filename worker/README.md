@@ -30,6 +30,7 @@ The RunPod job body is `{ "input": <TranscodeInput> }`.
 | `allowUpscale` | bool | `false` | If false, renditions taller than the source are dropped (smallest kept as a floor). |
 | `segmentSeconds` | int (2–20) | `6` | HLS segment length. Keyframes are aligned to this. |
 | `threads` | int | `0` | ffmpeg threads per encode. `0` = auto-tune to CPU count. |
+| `metadata` | object | `{}` | Free-form passthrough, echoed verbatim in the response. Tag jobs for usage attribution, e.g. `{ "app": "app-a" }` (see [Usage tracking](#usage-tracking)). |
 
 ### `Rendition`
 
@@ -172,6 +173,7 @@ e.g. `PUT /api/transcode-output/video-123/720p/index.m3u8`, then `…/720p/segme
 ```jsonc
 {
   "appVideoId": "video-123",
+  "metadata": { "app": "app-a" },          // echoed verbatim from the request
   "destinationType": "s3",                 // or "http"
   "outputs": [                              // every uploaded file
     { "relativePath": "master.m3u8", "location": "outputs/video-123/master.m3u8" },
@@ -200,6 +202,18 @@ e.g. `PUT /api/transcode-output/video-123/720p/index.m3u8`, then `…/720p/segme
 
 `location` is the S3 key for an `s3` destination, or the absolute URL for an `http` destination. `posterKey` /
 `posterUrl` is `null` if poster extraction failed (it is best-effort and never fails the job).
+
+---
+
+## Usage tracking
+
+To attribute usage per calling app/customer:
+
+- **Tag each job** via `metadata`, e.g. `"metadata": { "app": "app-a" }`. The worker echoes it back verbatim, so each result is self-describing.
+- **Billed seconds come from RunPod, not the worker.** RunPod's job status/webhook payload includes `executionTime` (ms of compute you're billed for) and `delayTime` (ms queued, not billed). The worker's own `durationMs` is a close secondary measure (download + encode + upload) but excludes cold start and RunPod's rounding — use `executionTime` for billing.
+- **The RunPod dashboard aggregates per endpoint**, so it can't split usage by your `app` within one shared endpoint. Capture `executionTime` + `metadata.app` per job in your own app/DB and sum per app over the period. (One endpoint per app is the only dashboard-native split.)
+
+The worker stays billing-agnostic — it just echoes your tags and reports its own timing; cost/rate logic lives in your app.
 
 ---
 

@@ -105,6 +105,7 @@ def handle_transcode(job: dict[str, Any]) -> dict[str, Any]:
 
     response: dict[str, Any] = {
         "appVideoId": payload.appVideoId,
+        "metadata": payload.metadata,
         "destinationType": payload.destination.type,
         "outputs": [
             {"relativePath": item.relativePath, "location": item.location} for item in stored
