@@ -56,7 +56,7 @@
 		<media-player
 			bind:this={player}
 			class="w-full"
-			style="aspect-ratio: 16 / 9;"
+			style="aspect-ratio: 16 / 9; display: block;"
 			{src}
 			poster={poster || undefined}
 			title={video?.title ?? ''}
