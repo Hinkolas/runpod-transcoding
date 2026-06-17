@@ -27,11 +27,16 @@
 	const poster = $derived(
 		playable && video?.posterReady ? `/api/files/${video.id}/output/poster.jpg` : ''
 	);
-	// Scrub-thumbnail index — only when the worker produced one. The VTT references
-	// its sprites by relative name, so they resolve next to it under this route.
-	const thumbnails = $derived(
-		playable && video?.storyboardReady ? `/api/files/${video.id}/output/storyboard.vtt` : ''
-	);
+	// Scrub-thumbnail index — only when the worker produced one. The VTT lists its
+	// sprites by relative name; vidstack resolves those against the VTT's own URL
+	// only when it's absolute, otherwise it falls back to the document URL and every
+	// sprite 404s (black thumbnails). So hand it an absolute URL. Read only on the
+	// client, after the player mounts, so `window` is always defined here.
+	const thumbnails = $derived.by(() => {
+		if (!playable || !video?.storyboardReady) return '';
+		const path = `/api/files/${video.id}/output/storyboard.vtt`;
+		return typeof window === 'undefined' ? path : new URL(path, window.location.href).href;
+	});
 
 	// Use the locally bundled hls.js instead of Vidstack's default CDN load, so the
 	// demo works offline and pins the version the app already depends on.
