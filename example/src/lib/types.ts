@@ -58,6 +58,14 @@ export type RenditionOutput = {
 	bandwidth: number;
 };
 
+/** Live progress while a job runs, parsed from the worker's `progress_update`.
+ * `percent` (0–100) is only present during the `encoding` phase; the other
+ * phases are short and reported as an indeterminate label. */
+export type JobProgress = {
+	phase: 'downloading' | 'probing' | 'encoding' | 'uploading';
+	percent: number | null;
+};
+
 /** Client-facing view of a video (no file bytes). */
 export type VideoRecord = {
 	id: string;
@@ -76,6 +84,7 @@ export type VideoRecord = {
 	delayTimeMs: number | null; // RunPod queue wait (not billed)
 	metadata: Record<string, unknown> | null; // echoed job tags, e.g. { app }
 	renditionsOut: RenditionOutput[] | null;
+	progress: JobProgress | null; // live phase/percent while queued or processing
 	error: string | null;
 	hasMaster: boolean;
 	posterReady: boolean;

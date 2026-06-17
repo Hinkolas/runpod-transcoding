@@ -4,7 +4,7 @@
 // we send RunPod is a job describing those URLs.
 
 import { env } from '$env/dynamic/private';
-import type { ProbeInfo, RenditionOutput, VideoRecord, VideoStatus } from '$lib/types';
+import type { JobProgress, ProbeInfo, RenditionOutput, VideoRecord, VideoStatus } from '$lib/types';
 import { updateVideo } from '$lib/server/store';
 
 function requireEnv(name: string): string {
@@ -101,18 +101,40 @@ export async function submitJob(
 	return { id: data.id, status: mapStatus(data.status || 'IN_QUEUE') };
 }
 
+/** The handler's return value — present in `output` once the job COMPLETES. */
+type TranscodeResult = {
+	probe?: ProbeInfo;
+	durationMs?: number;
+	metadata?: Record<string, unknown>;
+	renditions?: { label: string; height: number; width: number | null; bandwidth: number }[];
+};
+
 type RunpodStatusResponse = {
 	status?: string;
 	delayTime?: number; // ms spent queued (not billed)
 	executionTime?: number; // ms of compute RunPod bills for
-	output?: {
-		probe?: ProbeInfo;
-		durationMs?: number;
-		metadata?: Record<string, unknown>;
-		renditions?: { label: string; height: number; width: number | null; bandwidth: number }[];
-	};
+	// While IN_PROGRESS, `output` carries the worker's latest progress_update (a
+	// JSON string). On COMPLETED it is replaced by the handler's TranscodeResult.
+	output?: string | TranscodeResult;
 	error?: string;
 };
+
+/** Parse a worker `progress_update` payload (a JSON string) into JobProgress. */
+function parseProgress(output: string | TranscodeResult | undefined): JobProgress | null {
+	if (typeof output !== 'string') return null;
+	try {
+		const parsed = JSON.parse(output);
+		if (parsed && typeof parsed.phase === 'string') {
+			return {
+				phase: parsed.phase,
+				percent: typeof parsed.percent === 'number' ? parsed.percent : null
+			};
+		}
+	} catch {
+		/* not JSON — ignore */
+	}
+	return null;
+}
 
 /** Poll one job's status and fold the result into the store. */
 export async function refreshJob(video: VideoRecord): Promise<void> {
@@ -150,8 +172,9 @@ export async function refreshJob(video: VideoRecord): Promise<void> {
 
 	const status = mapStatus(data.status || 'IN_PROGRESS');
 	if (status === 'ready') {
+		const result = typeof data.output === 'object' ? data.output : undefined;
 		const renditionsOut: RenditionOutput[] | null =
-			data.output?.renditions?.map((r) => ({
+			result?.renditions?.map((r) => ({
 				label: r.label,
 				height: r.height,
 				width: r.width,
@@ -159,10 +182,11 @@ export async function refreshJob(video: VideoRecord): Promise<void> {
 			})) ?? null;
 		updateVideo(video.id, {
 			status: 'ready',
-			probe: data.output?.probe ?? null,
-			durationMs: data.output?.durationMs ?? null,
-			metadata: data.output?.metadata ?? null,
+			probe: result?.probe ?? null,
+			durationMs: result?.durationMs ?? null,
+			metadata: result?.metadata ?? null,
 			renditionsOut,
+			progress: null, // job done — drop the live progress
 			token: null, // job done — revoke the source/output capability
 			...timing
 		});
@@ -170,10 +194,14 @@ export async function refreshJob(video: VideoRecord): Promise<void> {
 		updateVideo(video.id, {
 			status: 'error',
 			error: data.error || `Job ${data.status?.toLowerCase() || 'failed'}`,
+			progress: null,
 			token: null,
 			...timing
 		});
 	} else {
-		updateVideo(video.id, { status });
+		// Keep the last known progress if this poll didn't carry a parseable one,
+		// so the bar doesn't flicker back to indeterminate between updates.
+		const progress = parseProgress(data.output);
+		updateVideo(video.id, progress ? { status, progress } : { status });
 	}
 }

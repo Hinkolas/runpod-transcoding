@@ -49,7 +49,15 @@
 				<p class="truncate text-base font-medium text-zinc-100" title={video.title}>{video.title}</p>
 			</button>
 			<p class="mt-0.5 text-sm text-zinc-500">{formatBytes(video.sizeBytes)}</p>
-			<div class="mt-2"><StatusBadge status={video.status} /></div>
+			<div class="mt-2"><StatusBadge status={video.status} progress={video.progress} /></div>
+			{#if busy && video.progress?.phase === 'encoding' && video.progress.percent !== null}
+				<div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
+					<div
+						class="h-full rounded-full bg-indigo-500 transition-all duration-500"
+						style="width: {video.progress.percent}%"
+					></div>
+				</div>
+			{/if}
 			{#if video.status === 'error' && video.error}
 				<p class="mt-1.5 line-clamp-2 text-sm text-rose-400/80" title={video.error}>{video.error}</p>
 			{/if}

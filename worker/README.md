@@ -235,6 +235,24 @@ generation failed (also best-effort).
 
 ---
 
+## Progress updates
+
+While the job runs, the worker reports progress via `runpod.serverless.progress_update`. Poll
+`GET https://api.runpod.ai/v2/{endpointId}/status/{jobId}`: while `status` is `IN_PROGRESS`, the `output` field
+carries the latest update as a JSON string. On `COMPLETED` it is replaced by the [Response](#response) object above.
+
+```jsonc
+{ "status": "IN_PROGRESS", "output": "{\"phase\":\"encoding\",\"percent\":42}" }
+```
+
+`phase` is one of `downloading`, `probing`, `encoding`, `uploading`. `percent` (0–100) is present only during
+`encoding` — it is the mean completion across the parallel renditions, derived from each ffmpeg's `out_time`
+against the probed source duration. Updates are throttled to ~1/s. **Progress is purely additive and best-effort:**
+a fire-and-forget caller that only reads the terminal result is unaffected, and if no client polls mid-job nothing
+about the final output changes.
+
+---
+
 ## Usage tracking
 
 To attribute usage per calling app/customer:

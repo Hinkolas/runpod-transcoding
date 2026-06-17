@@ -6,6 +6,7 @@
 // large files are buffered in memory.
 
 import type {
+	JobProgress,
 	ProbeInfo,
 	RenditionOutput,
 	TranscodeSettings,
@@ -32,6 +33,7 @@ type InternalVideo = {
 	delayTimeMs: number | null;
 	metadata: Record<string, unknown> | null;
 	renditionsOut: RenditionOutput[] | null;
+	progress: JobProgress | null;
 	error: string | null;
 	// Per-job bearer token: minted when a transcode is submitted, scoped to this
 	// video's source/output endpoints, and revoked when the job finishes. Secret —
@@ -80,6 +82,7 @@ function toPublic(video: InternalVideo): VideoRecord {
 		delayTimeMs: video.delayTimeMs,
 		metadata: video.metadata,
 		renditionsOut: video.renditionsOut,
+		progress: video.progress,
 		error: video.error,
 		hasMaster: video.outputs.has('master.m3u8'),
 		posterReady: video.outputs.has('poster.jpg'),
@@ -115,6 +118,7 @@ export function createVideo(input: {
 		delayTimeMs: null,
 		metadata: null,
 		renditionsOut: null,
+		progress: null,
 		error: null,
 		token: null,
 		source: { bytes: input.bytes, contentType: input.contentType || 'video/mp4' },
@@ -152,6 +156,7 @@ type VideoMutation = Partial<
 		| 'delayTimeMs'
 		| 'metadata'
 		| 'renditionsOut'
+		| 'progress'
 		| 'error'
 		| 'token'
 		| 'lastPolledAt'

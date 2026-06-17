@@ -1,7 +1,8 @@
 <script lang="ts">
-	import type { VideoStatus } from '$lib/types';
+	import type { JobProgress, VideoStatus } from '$lib/types';
 
-	let { status }: { status: VideoStatus } = $props();
+	let { status, progress = null }: { status: VideoStatus; progress?: JobProgress | null } =
+		$props();
 
 	const config: Record<VideoStatus, { label: string; classes: string; pulse?: boolean }> = {
 		idle: { label: 'Ready to encode', classes: 'bg-zinc-800 text-zinc-300 ring-zinc-700' },
@@ -11,7 +12,24 @@
 		error: { label: 'Failed', classes: 'bg-rose-500/10 text-rose-300 ring-rose-500/30' }
 	};
 
+	const phaseLabels: Record<JobProgress['phase'], string> = {
+		downloading: 'Downloading',
+		probing: 'Analyzing',
+		encoding: 'Encoding',
+		uploading: 'Uploading'
+	};
+
 	const current = $derived(config[status]);
+	// While processing, prefer the live phase (and percent during encoding).
+	const label = $derived.by(() => {
+		if (status === 'processing' && progress) {
+			const base = phaseLabels[progress.phase] ?? current.label;
+			return progress.phase === 'encoding' && progress.percent !== null
+				? `${base} ${progress.percent}%`
+				: base;
+		}
+		return current.label;
+	});
 </script>
 
 <span
@@ -21,5 +39,5 @@
 		class="h-2 w-2 rounded-full bg-current"
 		class:animate-pulse={current.pulse}
 	></span>
-	{current.label}
+	{label}
 </span>

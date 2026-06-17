@@ -12,8 +12,9 @@ import json
 import math
 import os
 import subprocess
+import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from schema import Rendition, Thumbnails
 
@@ -26,6 +27,51 @@ def run_command(command: list[str]) -> subprocess.CompletedProcess[str]:
             f"stderr: {result.stderr[-2000:]}"
         )
     return result
+
+
+def run_with_progress(
+    command: list[str],
+    duration: float,
+    on_progress: Callable[[float], None],
+) -> None:
+    """Run an ffmpeg command, reporting completion as a 0..1 fraction.
+
+    The command must include `-progress pipe:1`; ffmpeg then writes `key=value`
+    lines (notably `out_time_us`) to stdout, which we divide by the known source
+    `duration`. stderr is drained on a side thread so a chatty encoder can't fill
+    the pipe buffer and deadlock the stdout reader.
+    """
+    process = subprocess.Popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    assert process.stdout is not None and process.stderr is not None
+
+    stderr_tail: list[str] = []
+
+    def drain_stderr() -> None:
+        for line in process.stderr:  # type: ignore[union-attr]
+            stderr_tail.append(line)
+
+    err_thread = threading.Thread(target=drain_stderr, daemon=True)
+    err_thread.start()
+
+    for line in process.stdout:
+        if duration > 0 and line.startswith("out_time_us="):
+            raw = line[len("out_time_us=") :].strip()
+            try:
+                on_progress(min(1.0, max(0.0, int(raw) / 1_000_000 / duration)))
+            except ValueError:
+                pass  # 'N/A' before the first frame is decoded
+
+    process.wait()
+    err_thread.join()
+    if process.returncode != 0:
+        stderr = "".join(stderr_tail)
+        raise RuntimeError(
+            f"Command failed ({process.returncode}): {' '.join(command)}\n"
+            f"stderr: {stderr[-2000:]}"
+        )
+    on_progress(1.0)
 
 
 def probe_video(path: Path) -> dict[str, Any]:
@@ -96,14 +142,18 @@ def transcode_rendition(
     segment_seconds: int,
     threads: int,
     source_duration: float = 0.0,
+    on_progress: Callable[[float], None] | None = None,
 ) -> dict[str, Any]:
     variant_dir = output_dir / rendition.label
     variant_dir.mkdir(parents=True, exist_ok=True)
     playlist_path = variant_dir / "index.m3u8"
     segment_pattern = variant_dir / "segment_%05d.ts"
 
+    # `-progress pipe:1` streams machine-readable progress to stdout (read by
+    # run_with_progress); `-nostats` silences the human stats on stderr.
+    progress_flags = ["-nostats", "-progress", "pipe:1"] if on_progress else []
     command = [
-        "ffmpeg", "-y", "-i", str(source),
+        "ffmpeg", "-y", *progress_flags, "-i", str(source),
         "-vf", f"scale=-2:{rendition.height}",
         *encoder_args(rendition),
         "-threads", str(threads),
@@ -122,7 +172,10 @@ def transcode_rendition(
         "-hls_segment_filename", str(segment_pattern),
         str(playlist_path),
     ]
-    run_command(command)
+    if on_progress:
+        run_with_progress(command, source_duration, on_progress)
+    else:
+        run_command(command)
 
     # HLS master playlists require a BANDWIDTH per variant. Prefer the target
     # bitrate, else the cap (maxrate); with neither (uncapped CRF) measure the
