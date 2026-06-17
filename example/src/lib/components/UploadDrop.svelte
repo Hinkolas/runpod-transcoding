@@ -1,8 +1,9 @@
 <script lang="ts">
 	let {
 		onfiles,
-		uploading = false
-	}: { onfiles: (files: File[]) => void; uploading?: boolean } = $props();
+		uploading = false,
+		progress = 0
+	}: { onfiles: (files: File[]) => void; uploading?: boolean; progress?: number } = $props();
 
 	let dragging = $state(false);
 	let input = $state<HTMLInputElement | null>(null);
@@ -41,7 +42,19 @@
 			<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" />
 			<path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 0 1 8-8v3a5 5 0 0 0-5 5H4z" />
 		</svg>
-		<span class="text-base text-zinc-300">Uploading…</span>
+		<span class="text-base text-zinc-300">Uploading… {Math.round(progress)}%</span>
+		<div
+			class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-zinc-800"
+			role="progressbar"
+			aria-valuenow={Math.round(progress)}
+			aria-valuemin="0"
+			aria-valuemax="100"
+		>
+			<div
+				class="h-full rounded-full bg-indigo-400 transition-all duration-200 ease-out"
+				style="width: {progress}%"
+			></div>
+		</div>
 	{:else}
 		<svg class="h-7 w-7 text-zinc-500 transition group-hover:text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
 			<path d="M12 16V4m0 0 4 4m-4-4-4 4" stroke-linecap="round" stroke-linejoin="round" />

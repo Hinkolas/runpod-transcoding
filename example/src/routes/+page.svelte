@@ -19,6 +19,7 @@
 	let settings = $state<TranscodeSettings>(DEFAULT_SETTINGS);
 	let showSettings = $state(false);
 	let uploading = $state(false);
+	let uploadProgress = $state(0);
 	let uploadError = $state('');
 
 	const selected = $derived(videos.find((v) => v.id === selectedId) ?? null);
@@ -65,18 +66,46 @@
 		videos = videos.map((v) => (v.id === updated.id ? updated : v));
 	}
 
+	// XMLHttpRequest (not fetch) so we get upload.onprogress for the progress bar.
+	function uploadFile(
+		file: File,
+		onProgress: (loaded: number) => void
+	): Promise<{ ok: boolean; body: { video?: VideoRecord; message?: string } }> {
+		return new Promise((resolve, reject) => {
+			const xhr = new XMLHttpRequest();
+			xhr.open('POST', `/api/videos?filename=${encodeURIComponent(file.name)}`);
+			xhr.setRequestHeader('content-type', file.type || 'application/octet-stream');
+			xhr.upload.onprogress = (e) => {
+				if (e.lengthComputable) onProgress(e.loaded);
+			};
+			xhr.onload = () => {
+				let body = {};
+				try {
+					body = JSON.parse(xhr.responseText);
+				} catch {
+					/* non-JSON response */
+				}
+				resolve({ ok: xhr.status >= 200 && xhr.status < 300, body });
+			};
+			xhr.onerror = () => reject(new Error('Upload failed'));
+			xhr.send(file);
+		});
+	}
+
 	async function uploadFiles(files: File[]) {
 		uploading = true;
+		uploadProgress = 0;
 		uploadError = '';
+		const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
+		let uploadedBytes = 0;
 		try {
 			for (const file of files) {
-				const res = await fetch(`/api/videos?filename=${encodeURIComponent(file.name)}`, {
-					method: 'POST',
-					headers: { 'content-type': file.type || 'application/octet-stream' },
-					body: file
+				const { ok, body } = await uploadFile(file, (loaded) => {
+					uploadProgress = totalBytes ? ((uploadedBytes + loaded) / totalBytes) * 100 : 0;
 				});
-				const body = await res.json();
-				if (!res.ok) {
+				uploadedBytes += file.size;
+				uploadProgress = totalBytes ? (uploadedBytes / totalBytes) * 100 : 0;
+				if (!ok || !body.video) {
 					uploadError = body.message ?? 'Upload failed';
 					continue;
 				}
@@ -87,6 +116,7 @@
 			uploadError = 'Upload failed';
 		} finally {
 			uploading = false;
+			uploadProgress = 0;
 		}
 	}
 
@@ -202,7 +232,7 @@
 
 		<!-- Library -->
 		<aside class="space-y-4">
-			<UploadDrop onfiles={uploadFiles} {uploading} />
+			<UploadDrop onfiles={uploadFiles} {uploading} progress={uploadProgress} />
 			{#if uploadError}
 				<p class="text-xs text-rose-400">{uploadError}</p>
 			{/if}
