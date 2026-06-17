@@ -333,3 +333,37 @@ This runs the full handler once and prints the response JSON.
 | `transcode.py` | ffmpeg / ffprobe logic on local files. |
 | `storage.py` | `s3` and `http` source/destination backends + credential resolution. |
 | `handler.py` | Orchestration + RunPod entrypoint. |
+
+---
+
+## Roadmap / TODO
+
+### Test single-decode ladder generation (decode once, encode many)
+
+**Current behaviour:** the ladder is produced by **N independent ffmpeg processes** — one per rendition — run in parallel via a `ThreadPoolExecutor` (`handler.py`), each with its own `-i source` (`transcode.transcode_rendition`). This saturates a many-core box well, but every rung **re-decodes the full source**, so an N-rung ladder decodes the source N times (plus another full decode pass for the storyboard).
+
+**Idea to evaluate:** collapse the encodes into a **single ffmpeg command** that decodes once and fans the decoded frames out with a `split` filter, one scaled+encoded HLS output per rung:
+
+```
+ffmpeg -y -nostats -progress pipe:1 -i source \
+  -filter_complex "[0:v]split=3[s0][s1][s2];\
+                   [s0]scale=-2:1080[v0];[s1]scale=-2:720[v1];[s2]scale=-2:480[v2]" \
+  -map "[v0]" -map 0:a? <rung-0 opts> -f hls ... 1080p/index.m3u8 \
+  -map "[v1]" -map 0:a? <rung-1 opts> -f hls ... 720p/index.m3u8 \
+  -map "[v2]" -map 0:a? <rung-2 opts> -f hls ... 480p/index.m3u8
+```
+
+Each `<rung-N opts>` block is exactly the existing `encoder_args(r)` + `rate_control_args(r)` + GOP/`force_key_frames`/audio/HLS flags — they compose per-output unchanged. The refactor is mostly building the `split` graph and repeating the `-map … playlist` block per rung.
+
+**Why it could be worth it:**
+
+- **Decodes the source once** instead of N times (also cuts source disk reads N→1).
+- **Net-simplifies the Python:** one process means one aggregate `-progress` stream, so `EncodeProgress` (the per-rendition progress folding) and most of the `ThreadPoolExecutor` orchestration go away. Existing `run_with_progress` already consumes a single command's progress.
+- Error handling is unchanged in practice — today a single rung failing already fails the whole job (`future.result()` re-raises); one process has the same single-exit-code semantics.
+
+**The trade-off to measure:** a single ffmpeg process doesn't always saturate a high-core box as perfectly as N independent processes — the shared decode→filter stage is serial-ish and the slowest encoder can cause head-of-line blocking on frame delivery. So this trades *perfect multicore saturation* for *decode-the-source-once*. Net win depends on the source:
+
+- Cheap-to-decode source + slow preset → encode dominates, decode saving is small; could even lose a little to reduced parallelism.
+- Expensive-to-decode source (4K HEVC/AV1) + faster preset → decode is a real chunk, decode-once wins clearly.
+
+**To do:** benchmark single-command vs the current N-process approach (wall-clock + RunPod billed seconds) on representative sources on an actual RunPod CPU box before committing. Keep `-threads:v:N ≈ cpu / len(renditions)` per output so each encoder still gets a thread budget (mirrors `plan_concurrency`). Trade-off note: lost per-rendition progress granularity (acceptable — the UI only needs an aggregate percent). Leave the storyboard as its own separate decode pass for now so a thumbnail failure can't kill the encode.
