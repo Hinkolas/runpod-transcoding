@@ -11,11 +11,13 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3000
-# Source videos are uploaded through this server and held in memory — lift the
-# adapter-node request body cap (default 512K) so real video files can be posted.
+# Source videos are uploaded through this server and streamed into the bucket —
+# lift the adapter-node request body cap (default 512K) so real video files can be posted.
 ENV BODY_SIZE_LIMIT=Infinity
 COPY --from=build /app/build ./build
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
+# The schema migration, run as skali's release command.
+COPY --from=build /app/scripts ./scripts
 EXPOSE 3000
 CMD ["node", "build"]

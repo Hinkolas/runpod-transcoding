@@ -13,22 +13,29 @@ function contentTypeFor(path: string, fallback: string): string {
 
 /** The worker PUTs each HLS output file here (HTTP destination). Token-guarded. */
 export const PUT: RequestHandler = async ({ params, request }) => {
-	if (!isAuthorized(request, getVideoToken(params.id!))) {
+	if (!isAuthorized(request, await getVideoToken(params.id!))) {
 		return new Response('Unauthorized', { status: 401 });
 	}
 	const id = params.id!;
-	if (!getVideo(id)) return new Response('Not found', { status: 404 });
+	if (!(await getVideo(id))) return new Response('Not found', { status: 404 });
 	const path = params.path!; // e.g. "720p/segment_00001.ts" or "master.m3u8"
+	// Segments are a few MB at most, so buffering one before the PUT is fine.
 	const bytes = new Uint8Array(await request.arrayBuffer());
-	putOutput(id, path, { bytes, contentType: contentTypeFor(path, request.headers.get('content-type') ?? '') });
+	await putOutput(id, path, {
+		bytes,
+		contentType: contentTypeFor(path, request.headers.get('content-type') ?? '')
+	});
 	return new Response(null, { status: 204 });
 };
 
 /** The browser's player fetches playlists/segments/poster from here (public). */
-export const GET: RequestHandler = ({ params }) => {
-	const file = getOutput(params.id!, params.path!);
+export const GET: RequestHandler = async ({ params }) => {
+	const file = await getOutput(params.id!, params.path!);
 	if (!file) return new Response('Not found', { status: 404 });
-	return new Response(new Blob([file.bytes], { type: file.contentType }), {
-		headers: { 'content-type': file.contentType, 'cache-control': 'no-store' }
-	});
+	const headers: Record<string, string> = {
+		'content-type': file.contentType,
+		'cache-control': 'no-store'
+	};
+	if (file.contentLength !== undefined) headers['content-length'] = String(file.contentLength);
+	return new Response(file.body, { headers });
 };

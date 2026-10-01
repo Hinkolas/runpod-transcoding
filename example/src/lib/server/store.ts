@@ -1,93 +1,72 @@
-// In-memory state. No database — videos, their source bytes, the HLS output
-// files the worker uploads, and a per-job auth token all live in RAM. State
-// is held on `globalThis` so it survives Vite HMR reloads during development.
-//
-// This is intentionally simple for a demo: everything is lost on restart, and
-// large files are buffered in memory.
+// Video records live in PostgreSQL; the source video and the HLS output files
+// the worker uploads live in the S3 bucket (see storage.ts). Nothing is held in
+// process memory, so any replica can serve any request — including the worker's
+// source download and output uploads — and state survives restarts and deploys.
 
-import type {
-	JobProgress,
-	ProbeInfo,
-	RenditionOutput,
-	TranscodeSettings,
-	VideoRecord,
-	VideoStatus
-} from '$lib/types';
+import type { JSONValue } from 'postgres';
+import type { VideoRecord } from '$lib/types';
+import { db } from '$lib/server/db';
+import {
+	deletePrefix,
+	getObject,
+	outputKey,
+	outputPrefix,
+	putObject,
+	sourceKey,
+	uploadStream,
+	videoPrefix,
+	type StoredObject
+} from '$lib/server/storage';
 
-export type StoredFile = { bytes: Uint8Array<ArrayBuffer>; contentType: string };
-
-type InternalVideo = {
-	id: string;
-	title: string;
-	filename: string;
-	sizeBytes: number;
-	contentType: string;
-	status: VideoStatus;
-	createdAt: number;
-	updatedAt: number;
-	settings: TranscodeSettings | null;
-	runpodJobId: string | null;
-	probe: ProbeInfo | null;
-	durationMs: number | null;
-	executionTimeMs: number | null;
-	delayTimeMs: number | null;
-	metadata: Record<string, unknown> | null;
-	renditionsOut: RenditionOutput[] | null;
-	progress: JobProgress | null;
-	error: string | null;
+type VideoRow = VideoRecord & {
 	// Per-job bearer token: minted when a transcode is submitted, scoped to this
 	// video's source/output endpoints, and revoked when the job finishes. Secret —
 	// never serialized to the browser.
 	token: string | null;
-	source: StoredFile | null;
-	outputs: Map<string, StoredFile>;
 	lastPolledAt: number;
 };
 
-type Store = {
-	videos: Map<string, InternalVideo>;
+// Columns the browser may see: everything except the token and poll bookkeeping.
+const PUBLIC_COLUMNS = [
+	'id',
+	'title',
+	'filename',
+	'size_bytes',
+	'content_type',
+	'status',
+	'created_at',
+	'updated_at',
+	'settings',
+	'runpod_job_id',
+	'probe',
+	'duration_ms',
+	'execution_time_ms',
+	'delay_time_ms',
+	'metadata',
+	'renditions_out',
+	'progress',
+	'error',
+	'has_master',
+	'poster_ready',
+	'storyboard_ready'
+];
+
+// jsonb columns must be sent with sql.json, or arrays would bind as Postgres arrays.
+const JSON_FIELDS = new Set(['settings', 'probe', 'metadata', 'renditionsOut', 'progress']);
+
+// Output files whose arrival the UI tracks.
+const READY_FLAGS: Record<string, 'hasMaster' | 'posterReady' | 'storyboardReady'> = {
+	'master.m3u8': 'hasMaster',
+	'poster.jpg': 'posterReady',
+	'storyboard.vtt': 'storyboardReady'
 };
 
-const globalRef = globalThis as unknown as { __transcodeStore?: Store };
-
-function getStore(): Store {
-	if (!globalRef.__transcodeStore) {
-		globalRef.__transcodeStore = { videos: new Map() };
-	}
-	return globalRef.__transcodeStore;
-}
-
-const store = getStore();
-
 /** The per-job token for a video, for validating source/output requests. */
-export function getVideoToken(id: string): string | null {
-	return store.videos.get(id)?.token ?? null;
-}
-
-function toPublic(video: InternalVideo): VideoRecord {
-	return {
-		id: video.id,
-		title: video.title,
-		filename: video.filename,
-		sizeBytes: video.sizeBytes,
-		contentType: video.contentType,
-		status: video.status,
-		createdAt: video.createdAt,
-		updatedAt: video.updatedAt,
-		settings: video.settings,
-		runpodJobId: video.runpodJobId,
-		probe: video.probe,
-		durationMs: video.durationMs,
-		executionTimeMs: video.executionTimeMs,
-		delayTimeMs: video.delayTimeMs,
-		metadata: video.metadata,
-		renditionsOut: video.renditionsOut,
-		progress: video.progress,
-		error: video.error,
-		hasMaster: video.outputs.has('master.m3u8'),
-		posterReady: video.outputs.has('poster.jpg'),
-		storyboardReady: video.outputs.has('storyboard.vtt')
-	};
+export async function getVideoToken(id: string): Promise<string | null> {
+	const sql = db();
+	const [row] = await sql<{ token: string | null }[]>`
+		select token from videos where id = ${id}`;
+	return row?.token ?? null;
 }
 
 function stripExtension(name: string): string {
@@ -95,58 +74,66 @@ function stripExtension(name: string): string {
 	return dot > 0 ? name.slice(0, dot) : name;
 }
 
-export function createVideo(input: {
+/**
+ * Store an uploaded source video: stream the body into the bucket, then insert
+ * the record. Throws if the body exceeds `maxBytes`.
+ */
+export async function createVideo(input: {
 	filename: string;
 	contentType: string;
-	bytes: Uint8Array<ArrayBuffer>;
-}): VideoRecord {
+	body: ReadableStream<Uint8Array>;
+	maxBytes: number;
+}): Promise<VideoRecord> {
+	const sql = db();
+	const id = crypto.randomUUID();
+	const contentType = input.contentType || 'video/mp4';
+	let sizeBytes: number;
+	try {
+		sizeBytes = await uploadStream(sourceKey(id), input.body, contentType, input.maxBytes);
+	} catch (error) {
+		await deletePrefix(videoPrefix(id)).catch(() => {});
+		throw error;
+	}
 	const now = Date.now();
-	const video: InternalVideo = {
-		id: crypto.randomUUID(),
-		title: stripExtension(input.filename) || 'Untitled',
-		filename: input.filename,
-		sizeBytes: input.bytes.byteLength,
-		contentType: input.contentType || 'video/mp4',
-		status: 'idle',
-		createdAt: now,
-		updatedAt: now,
-		settings: null,
-		runpodJobId: null,
-		probe: null,
-		durationMs: null,
-		executionTimeMs: null,
-		delayTimeMs: null,
-		metadata: null,
-		renditionsOut: null,
-		progress: null,
-		error: null,
-		token: null,
-		source: { bytes: input.bytes, contentType: input.contentType || 'video/mp4' },
-		outputs: new Map(),
-		lastPolledAt: 0
-	};
-	store.videos.set(video.id, video);
-	return toPublic(video);
+	const [video] = await sql<VideoRecord[]>`
+		insert into videos ${sql({
+			id,
+			title: stripExtension(input.filename) || 'Untitled',
+			filename: input.filename,
+			sizeBytes,
+			contentType,
+			status: 'idle',
+			createdAt: now,
+			updatedAt: now
+		})}
+		returning ${sql(PUBLIC_COLUMNS)}`;
+	return video;
 }
 
-export function listVideos(): VideoRecord[] {
-	return [...store.videos.values()]
-		.sort((a, b) => b.createdAt - a.createdAt)
-		.map(toPublic);
+export async function listVideos(): Promise<VideoRecord[]> {
+	const sql = db();
+	return await sql<VideoRecord[]>`
+		select ${sql(PUBLIC_COLUMNS)} from videos order by created_at desc`;
 }
 
-export function getVideo(id: string): VideoRecord | null {
-	const video = store.videos.get(id);
-	return video ? toPublic(video) : null;
+export async function getVideo(id: string): Promise<VideoRecord | null> {
+	const sql = db();
+	const [video] = await sql<VideoRecord[]>`
+		select ${sql(PUBLIC_COLUMNS)} from videos where id = ${id}`;
+	return video ?? null;
 }
 
-export function deleteVideo(id: string): boolean {
-	return store.videos.delete(id);
+export async function deleteVideo(id: string): Promise<boolean> {
+	const sql = db();
+	const removed = await sql`delete from videos where id = ${id}`;
+	if (!removed.count) return false;
+	await deletePrefix(videoPrefix(id));
+	return true;
 }
 
 type VideoMutation = Partial<
 	Pick<
-		InternalVideo,
+		VideoRow,
 		| 'status'
 		| 'settings'
 		| 'runpodJobId'
@@ -160,55 +147,63 @@ type VideoMutation = Partial<
 		| 'error'
 		| 'token'
 		| 'lastPolledAt'
+		| 'hasMaster'
+		| 'posterReady'
+		| 'storyboardReady'
 	>
 >;
 
-export function updateVideo(id: string, changes: VideoMutation): VideoRecord | null {
-	const video = store.videos.get(id);
-	if (!video) return null;
-	Object.assign(video, changes);
-	video.updatedAt = Date.now();
-	return toPublic(video);
+export async function updateVideo(id: string, changes: VideoMutation): Promise<VideoRecord | null> {
+	const sql = db();
+	const values = Object.fromEntries(
+		Object.entries(changes).map(([field, value]) => [
+			field,
+			JSON_FIELDS.has(field) && value !== null ? sql.json(value as JSONValue) : value
+		])
+	);
+	const [video] = await sql<VideoRecord[]>`
+		update videos set ${sql({ ...values, updatedAt: Date.now() })}
+		where id = ${id}
+		returning ${sql(PUBLIC_COLUMNS)}`;
+	return video ?? null;
 }
 
 /** Wipe any previously uploaded HLS output (used when re-encoding). */
-export function clearOutputs(id: string): void {
-	store.videos.get(id)?.outputs.clear();
+export async function clearOutputs(id: string): Promise<void> {
+	await deletePrefix(outputPrefix(id));
+	await updateVideo(id, { hasMaster: false, posterReady: false, storyboardReady: false });
 }
 
-export function getSource(id: string): StoredFile | null {
-	return store.videos.get(id)?.source ?? null;
+export async function getSource(id: string): Promise<StoredObject | null> {
+	return getObject(sourceKey(id));
 }
 
-export function putOutput(id: string, relativePath: string, file: StoredFile): boolean {
-	const video = store.videos.get(id);
-	if (!video) return false;
-	video.outputs.set(relativePath, file);
-	video.updatedAt = Date.now();
-	return true;
+export async function putOutput(
+	id: string,
+	relativePath: string,
+	file: { bytes: Uint8Array; contentType: string }
+): Promise<void> {
+	await putObject(outputKey(id, relativePath), file.bytes, file.contentType);
+	const flag = READY_FLAGS[relativePath];
+	if (flag) await updateVideo(id, { [flag]: true });
 }
 
-export function getOutput(id: string, relativePath: string): StoredFile | null {
-	return store.videos.get(id)?.outputs.get(relativePath) ?? null;
+export async function getOutput(id: string, relativePath: string): Promise<StoredObject | null> {
+	return getObject(outputKey(id, relativePath));
 }
 
 /**
- * Records that still have an in-flight RunPod job and are due for a status poll.
- * `lastPolledAt` throttling lives in the caller via {@link markPolled}.
+ * Claim the records that still have an in-flight RunPod job and are due for a
+ * status poll. Claiming stamps `last_polled_at` in the same statement, so
+ * concurrent requests (on any replica) don't stampede RunPod for the same job.
  */
-export function pollableVideos(throttleMs: number): VideoRecord[] {
+export async function pollableVideos(throttleMs: number): Promise<VideoRecord[]> {
+	const sql = db();
 	const now = Date.now();
-	return [...store.videos.values()]
-		.filter(
-			(v) =>
-				v.runpodJobId !== null &&
-				(v.status === 'queued' || v.status === 'processing') &&
-				now - v.lastPolledAt >= throttleMs
-		)
-		.map(toPublic);
-}
-
-/** Internal accessor for services that need the job id without exposing bytes. */
-export function getJobId(id: string): string | null {
-	return store.videos.get(id)?.runpodJobId ?? null;
+	return await sql<VideoRecord[]>`
+		update videos set last_polled_at = ${now}
+		where runpod_job_id is not null
+			and status in ('queued', 'processing')
+			and last_polled_at <= ${now - throttleMs}
+		returning ${sql(PUBLIC_COLUMNS)}`;
 }

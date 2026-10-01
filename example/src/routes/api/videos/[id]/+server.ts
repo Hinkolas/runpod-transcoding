@@ -4,16 +4,16 @@ import { refreshJob } from '$lib/server/runpod';
 
 /** Fetch a single video, refreshing its job status if it is in-flight. */
 export const GET: RequestHandler = async ({ params }) => {
-	let video = getVideo(params.id!);
+	let video = await getVideo(params.id!);
 	if (!video) return json({ message: 'Video not found' }, { status: 404 });
 	if (video.runpodJobId && (video.status === 'queued' || video.status === 'processing')) {
 		await refreshJob(video);
-		video = getVideo(params.id!);
+		video = await getVideo(params.id!);
 	}
 	return json({ video });
 };
 
-export const DELETE: RequestHandler = ({ params }) => {
-	const removed = deleteVideo(params.id!);
+export const DELETE: RequestHandler = async ({ params }) => {
+	const removed = await deleteVideo(params.id!);
 	return new Response(null, { status: removed ? 204 : 404 });
 };

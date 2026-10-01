@@ -61,7 +61,8 @@ uses the built-in `GITHUB_TOKEN` (no secrets to configure) and builds `linux/amd
 ## Demo UI
 
 See [`example/README.md`](example/README.md) to run the SvelteKit demo (upload a video, tweak settings,
-encode, and play the HLS result). It uses the worker's HTTP transport and keeps state in memory — no database.
+encode, and play the HLS result). It uses the worker's HTTP transport, keeps its records in Postgres and its files
+in an S3 bucket, and ships a [`skali.yaml`](example/skali.yaml) for deploying it with [skali](https://github.com/Hinkolas/skali).
 
 ## License
 

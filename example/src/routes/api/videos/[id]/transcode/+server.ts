@@ -6,7 +6,7 @@ import type { TranscodeSettings } from '$lib/types';
 /** Start (or restart) a transcode for a video with the supplied settings. */
 export const POST: RequestHandler = async ({ params, request, url }) => {
 	const id = params.id!;
-	if (!getVideo(id)) return json({ message: 'Video not found' }, { status: 404 });
+	if (!(await getVideo(id))) return json({ message: 'Video not found' }, { status: 404 });
 
 	let settings: TranscodeSettings;
 	try {
@@ -21,9 +21,9 @@ export const POST: RequestHandler = async ({ params, request, url }) => {
 	// Mint a fresh per-job token scoped to this video's source/output endpoints.
 	const token = crypto.randomUUID();
 
-	// Reset any prior run before queueing the new one.
-	clearOutputs(id);
-	updateVideo(id, {
+	// Reset any prior run before queueing the new one. Swapping the token first
+	// revokes a still-running previous job before its outputs are wiped.
+	await updateVideo(id, {
 		settings,
 		status: 'queued',
 		error: null,
@@ -36,15 +36,16 @@ export const POST: RequestHandler = async ({ params, request, url }) => {
 		probe: null,
 		token
 	});
+	await clearOutputs(id);
 
 	try {
-		const video = getVideo(id)!; // now carries the new settings
+		const video = (await getVideo(id))!; // now carries the new settings
 		const result = await submitJob(video, publicBaseUrl(url), token);
-		const updated = updateVideo(id, { runpodJobId: result.id, status: result.status });
+		const updated = await updateVideo(id, { runpodJobId: result.id, status: result.status });
 		return json({ video: updated });
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Failed to submit job';
-		const updated = updateVideo(id, { status: 'error', error: message, token: null });
+		const updated = await updateVideo(id, { status: 'error', error: message, token: null });
 		return json({ message, video: updated }, { status: 500 });
 	}
 };

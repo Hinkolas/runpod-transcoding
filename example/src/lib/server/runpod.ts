@@ -1,5 +1,5 @@
-// Talks to the RunPod serverless endpoint and translates job state back into our
-// in-memory store. The worker uses HTTP transport: it downloads the source from
+// Talks to the RunPod serverless endpoint and translates job state back into the
+// video store. The worker uses HTTP transport: it downloads the source from
 // this server and uploads the HLS output back to this server, so the only thing
 // we send RunPod is a job describing those URLs.
 
@@ -140,7 +140,7 @@ function parseProgress(output: string | TranscodeResult | undefined): JobProgres
 export async function refreshJob(video: VideoRecord): Promise<void> {
 	if (!video.runpodJobId) return;
 	// Throttle: mark polled up-front so concurrent requests don't stampede RunPod.
-	updateVideo(video.id, { lastPolledAt: Date.now() });
+	await updateVideo(video.id, { lastPolledAt: Date.now() });
 
 	let endpointId: string;
 	let apiKey: string;
@@ -180,7 +180,7 @@ export async function refreshJob(video: VideoRecord): Promise<void> {
 				width: r.width,
 				bandwidth: r.bandwidth
 			})) ?? null;
-		updateVideo(video.id, {
+		await updateVideo(video.id, {
 			status: 'ready',
 			probe: result?.probe ?? null,
 			durationMs: result?.durationMs ?? null,
@@ -191,7 +191,7 @@ export async function refreshJob(video: VideoRecord): Promise<void> {
 			...timing
 		});
 	} else if (status === 'error') {
-		updateVideo(video.id, {
+		await updateVideo(video.id, {
 			status: 'error',
 			error: data.error || `Job ${data.status?.toLowerCase() || 'failed'}`,
 			progress: null,
@@ -202,6 +202,6 @@ export async function refreshJob(video: VideoRecord): Promise<void> {
 		// Keep the last known progress if this poll didn't carry a parseable one,
 		// so the bar doesn't flicker back to indeterminate between updates.
 		const progress = parseProgress(data.output);
-		updateVideo(video.id, progress ? { status, progress } : { status });
+		await updateVideo(video.id, progress ? { status, progress } : { status });
 	}
 }
