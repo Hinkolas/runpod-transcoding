@@ -3,13 +3,17 @@
 All job configuration is driven by the request `input`. Storage is pluggable per
 request via discriminated unions on `source` and `destination` (`type: "s3" | "http"`),
 and every quality rendition — including audio settings — is fully configurable.
+
+A job lists the outputs it wants (video `renditions`, `audioRenditions`, an
+`audioDownload`, a `waveform`); the worker produces what the source supports and
+reports the rest as skipped.
 """
 
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _parse_bitrate(value: str) -> int:
@@ -65,6 +69,82 @@ class Rendition(BaseModel):
                     f"maxrate ({self.maxrate}) must be >= videoBitrate ({self.videoBitrate})"
                 )
         return self
+
+
+# --- Audio outputs --------------------------------------------------------------
+
+# Sample rates accepted for every audio output (all valid for both AAC and MP3).
+AudioSampleRate = Literal[22050, 24000, 32000, 44100, 48000]
+
+
+def _check_audio_bitrate(value: str) -> str:
+    if _parse_bitrate(value) <= 0:
+        raise ValueError(f"Invalid bitrate {value!r}; use e.g. '128k' or '128000'")
+    return value
+
+
+class AudioRendition(BaseModel):
+    """One audio-only HLS rendition (AAC-LC in MPEG-TS segments).
+
+    Written to `audio/<label>/index.m3u8` and listed in the audio master
+    playlist `audio.m3u8`.
+    """
+
+    label: str = Field(pattern=r"^[A-Za-z0-9_-]{1,32}$")
+    bitrate: str = "128k"
+    channels: int = Field(default=2, ge=1, le=8)
+    sampleRate: AudioSampleRate = 48000
+
+    @field_validator("bitrate")
+    @classmethod
+    def _check_bitrate(cls, value: str) -> str:
+        return _check_audio_bitrate(value)
+
+
+class AudioDownload(BaseModel):
+    """One progressive audio file for download (`audio.mp3` or `audio.m4a`)."""
+
+    format: Literal["mp3", "m4a"]
+    bitrate: str = "128k"
+    channels: int = Field(default=2, ge=1, le=8)
+    # None => 44100 for mp3, 48000 for m4a.
+    sampleRate: AudioSampleRate | None = None
+
+    @field_validator("bitrate")
+    @classmethod
+    def _check_bitrate(cls, value: str) -> str:
+        return _check_audio_bitrate(value)
+
+    @model_validator(mode="after")
+    def _check_channels(self) -> "AudioDownload":
+        if self.format == "mp3" and self.channels > 2:
+            raise ValueError("mp3 supports at most 2 channels")
+        return self
+
+    @property
+    def effective_sample_rate(self) -> int:
+        if self.sampleRate is not None:
+            return self.sampleRate
+        return 44100 if self.format == "mp3" else 48000
+
+
+class Waveform(BaseModel):
+    """Peak data for drawing a waveform (audiowaveform / peaks.js JSON, version 2)."""
+
+    peaksPerSecond: int = Field(default=20, ge=1, le=100)
+    bits: Literal[8, 16] = 8
+
+
+class Loudness(BaseModel):
+    """Two-pass EBU R128 loudness normalisation (ffmpeg loudnorm).
+
+    Applied to the audio renditions and the audio download only: never to the
+    audio muxed into video renditions, and never to the waveform.
+    """
+
+    targetLufs: float = Field(default=-16, ge=-70, le=-5)
+    truePeak: float = Field(default=-1.5, ge=-9, le=0)
+    lra: float = Field(default=11, ge=1, le=50)
 
 
 # --- Scrub thumbnails (storyboard sprites + WebVTT) -----------------------------
@@ -152,7 +232,8 @@ class TranscodeInput(BaseModel):
     appVideoId: str                  # caller-supplied correlation id, echoed in the response
     source: Source
     destination: Destination
-    renditions: list[Rendition] = Field(min_length=1)
+    # Video renditions. Produced only when the source has a video stream.
+    renditions: list[Rendition] = Field(default_factory=list)
     # Opt-in scrub thumbnails. None => no storyboard is generated.
     thumbnails: Thumbnails | None = None
     allowUpscale: bool = False
@@ -161,3 +242,22 @@ class TranscodeInput(BaseModel):
     # Free-form passthrough, echoed verbatim in the response. Use it to tag a job
     # for usage attribution, e.g. {"app": "app-a", ...}.
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Audio outputs. Produced only when the source has an audio stream.
+    audioRenditions: list[AudioRendition] = Field(default_factory=list)
+    audioDownload: AudioDownload | None = None
+    waveform: Waveform | None = None
+    # Loudness normalisation for audioRenditions and audioDownload.
+    loudness: Loudness | None = None
+
+    @model_validator(mode="after")
+    def _check_outputs(self) -> "TranscodeInput":
+        labels = [rendition.label for rendition in self.audioRenditions]
+        duplicates = sorted({label for label in labels if labels.count(label) > 1})
+        if duplicates:
+            raise ValueError(f"Duplicate audioRenditions label(s): {', '.join(duplicates)}")
+        if not (self.renditions or self.audioRenditions or self.audioDownload or self.waveform):
+            raise ValueError(
+                "Request at least one output: renditions, audioRenditions, "
+                "audioDownload or waveform"
+            )
+        return self
