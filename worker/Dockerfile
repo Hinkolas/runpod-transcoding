@@ -19,6 +19,6 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN python3 -m pip install --no-cache-dir -r requirements.txt
 
-COPY handler.py schema.py transcode.py storage.py ./
+COPY handler.py schema.py transcode.py storage.py waveform.py ./
 
 CMD ["python3", "-u", "handler.py"]
