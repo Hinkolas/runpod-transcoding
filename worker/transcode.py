@@ -181,9 +181,8 @@ def bitrate_to_int(value: str) -> int:
 def calculated_width(source_width: int, source_height: int, target_height: int) -> int | None:
     if not source_width or not source_height:
         return None
-    # What ffmpeg's scale=-2 encodes: the nearest width, rounded down to even.
-    scaled = round((source_width / source_height) * target_height)
-    return scaled - scaled % 2
+    # What ffmpeg's scale=-2 encodes: the nearest even width (halves round up).
+    return 2 * math.floor(source_width * target_height / source_height / 2 + 0.5)
 
 
 def encoder_args(rendition: Rendition) -> list[str]:

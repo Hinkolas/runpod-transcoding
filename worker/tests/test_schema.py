@@ -108,3 +108,11 @@ def test_loudness_ranges():
                 {"truePeak": -10}, {"lra": 0}, {"lra": 51}):
         with pytest.raises(ValidationError):
             make(waveform={}, loudness=bad)
+
+
+def test_calculated_width_matches_ffmpeg_scale():
+    # Measured with ffmpeg's scale=-2.
+    from transcode import calculated_width
+    cases = {(1280, 720, 480): 854, (640, 360, 240): 426, (1000, 750, 241): 322, (720, 1280, 480): 270}
+    for (w, h, target), expected in cases.items():
+        assert calculated_width(w, h, target) == expected
