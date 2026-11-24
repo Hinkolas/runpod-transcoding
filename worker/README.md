@@ -3,7 +3,7 @@
 A general-purpose [RunPod serverless](https://docs.runpod.io/serverless/overview) worker that transcodes a
 source video or audio file into [HLS](https://en.wikipedia.org/wiki/HTTP_Live_Streaming) renditions (multiple
 quality levels) plus a master playlist and a poster, and optionally into audio-only renditions (podcasts, music),
-a progressive mp3/m4a download and waveform peaks. This document describes release **v0.2.0**.
+a progressive mp3/m4a download and waveform peaks. This document describes release **v0.2.1**.
 
 Everything about a job is driven by the request — the quality renditions (resolution, bitrate, codec, audio),
 and **where the source is fetched from and where the output is written to**. Storage is pluggable per request,
@@ -363,9 +363,10 @@ audio/128k/index.m3u8
 
 ### Poster
 
-- Video source: a frame 3 s in (or half-way for shorter files), 640 px wide. `poster.source = "frame"`.
-- No video but embedded cover art: the cover art, re-encoded to JPEG and scaled down to fit 1280×1280 (never
-  upscaled). `poster.source = "coverArt"`.
+- Video source: a frame 3 s in (or half-way for shorter files) at the source's resolution, scaled down to fit
+  1920×1920 (never upscaled; before v0.2.1 it was always 640 px wide). `poster.source = "frame"`.
+- No video but embedded cover art: the cover art, re-encoded to JPEG and scaled down to fit 3000×3000 (never
+  upscaled; 1280×1280 before v0.2.1). `poster.source = "coverArt"`.
 - Neither: no poster. The poster is best-effort and never fails the job.
 
 A video stream flagged as an attached picture is always treated as cover art, never as video. Every ffmpeg
