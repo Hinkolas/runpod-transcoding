@@ -175,7 +175,10 @@ def media(tmp_path_factory) -> dict[str, Path]:
         "video_silent": root / "silent.mp4",
         "video_audio": root / "video_audio.mp4",
         "quiet_mp3": root / "quiet.mp3",
+        "silent_mp3": root / "silence.mp3",
     }
+    ffmpeg("-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", "6",
+           "-c:a", "libmp3lame", "-b:a", "64k", str(files["silent_mp3"]))
     ffmpeg(
         "-f", "lavfi", "-i", sine, "-i", str(cover),
         "-map", "0:a", "-map", "1:v", *stereo,

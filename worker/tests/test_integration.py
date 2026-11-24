@@ -373,3 +373,15 @@ def test_upload_retries_inside_a_job(local_http, media, progress_events, monkeyp
     assert sleeps == [1, 1, 2]
     assert response["audio"]["masterPlaylist"] == "audio.m3u8"
     assert (received(local_http) / "waveform.json").exists()
+
+
+def test_loudness_leaves_silence_alone(local_http, media, progress_events):
+    response = run_job(
+        local_http, media["silent_mp3"],
+        audioRenditions=[{"label": "a64", "bitrate": "64k"}],
+        audioDownload={"format": "mp3"},
+        loudness={"targetLufs": -16, "truePeak": -1.5},
+    )
+    assert response["loudness"] is None
+    assert [r["label"] for r in response["audio"]["renditions"]] == ["a64"]
+    assert response["audio"]["download"]["file"] == "audio.mp3"

@@ -233,7 +233,8 @@ def handle_transcode(job: dict[str, Any]) -> dict[str, Any]:
             def audio_filter() -> str | None:
                 if loudness_future is None:
                     return None
-                return transcode.loudnorm_filter(loudness_future.result())
+                analysis = loudness_future.result()
+                return transcode.loudnorm_filter(analysis) if analysis else None
 
             encode_futures = [
                 pool.submit(encode, slot, rendition)

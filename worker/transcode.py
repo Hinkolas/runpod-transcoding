@@ -181,8 +181,9 @@ def bitrate_to_int(value: str) -> int:
 def calculated_width(source_width: int, source_height: int, target_height: int) -> int | None:
     if not source_width or not source_height:
         return None
+    # What ffmpeg's scale=-2 encodes: the nearest width, rounded down to even.
     scaled = round((source_width / source_height) * target_height)
-    return scaled if scaled % 2 == 0 else scaled + 1
+    return scaled - scaled % 2
 
 
 def encoder_args(rendition: Rendition) -> list[str]:
@@ -387,8 +388,10 @@ def analyse_loudness(
     settings: Loudness,
     duration: float,
     on_progress: Callable[[float], None] | None = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     """Loudnorm pass 1: measure the chosen audio stream.
+
+    Returns None for silence, which has no loudness to normalise.
 
     Returns the measured values needed by pass 2. Raises with a clear message if
     the analysis fails, since normalisation was explicitly requested.
@@ -419,10 +422,10 @@ def analyse_loudness(
     except (KeyError, ValueError) as error:
         raise RuntimeError(f"Loudness analysis failed: unreadable measurement ({error})") from error
     if not all(math.isfinite(value) for value in measured.values()):
-        raise RuntimeError(
-            "Loudness analysis failed: the audio is silent or too quiet to measure "
-            f"(integrated loudness {raw.get('input_i')} LUFS)"
-        )
+        # Silence (or near silence) has no loudness to normalise: encode the
+        # audio as it is rather than failing the whole job.
+        print(f"loudness: nothing to normalise (integrated loudness {raw.get('input_i')} LUFS)", flush=True)
+        return None
     return {
         "measuredI": measured["input_i"],
         "measuredTP": measured["input_tp"],
