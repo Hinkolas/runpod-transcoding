@@ -132,7 +132,7 @@ def test_mp3_with_cover_art(local_http, media, progress_events):
     assert response["storyboard"] is None
     assert response["poster"] == {"file": "poster.jpg", "source": "coverArt"}
     poster = ffprobe(received(local_http) / "poster.jpg", "-show_streams")["streams"][0]
-    assert (poster["width"], poster["height"]) == (1280, 720)  # 1600x900 fitted into 1280x1280
+    assert (poster["width"], poster["height"]) == (1600, 900)  # under 3000 px: kept as it is
 
     audio = response["audio"]
     assert audio["masterPlaylist"] == "audio.m3u8"

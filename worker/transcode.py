@@ -567,10 +567,26 @@ def encode_audio_download(
 # --- Poster ---------------------------------------------------------------------
 
 
+# The longest side of a poster frame and of embedded cover art. A frame is
+# taken at the source's resolution up to Full HD; cover art is kept up to the
+# 3000 px podcast apps ask for. Neither is ever upscaled.
+POSTER_MAX_SIDE = 1920
+COVER_ART_MAX_SIDE = 3000
+
+
+def fit_filter(max_side: int) -> str:
+    """ffmpeg filter that fits a picture into max_side x max_side, never upscaling."""
+    return (
+        f"scale='min({max_side},iw)':'min({max_side},ih)'"
+        ":force_original_aspect_ratio=decrease"
+    )
+
+
 def extract_poster(
     source: Path, output_dir: Path, duration: float, video_index: int
 ) -> Path | None:
-    """Best-effort poster: one frame of the video stream, 640px wide."""
+    """Best-effort poster: one frame of the video stream, at the source's
+    resolution with the long side capped at POSTER_MAX_SIDE."""
     seek = max(0.0, min(3.0, duration / 2 if duration else 1.0))
     poster_path = output_dir / "poster.jpg"
     try:
@@ -578,7 +594,8 @@ def extract_poster(
             [
                 "ffmpeg", "-y", "-ss", f"{seek:.2f}", "-i", str(source),
                 "-map", f"0:{video_index}",
-                "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "3", str(poster_path),
+                "-frames:v", "1", "-vf", fit_filter(POSTER_MAX_SIDE), "-q:v", "3",
+                str(poster_path),
             ]
         )
         return poster_path if poster_path.exists() else None
@@ -590,7 +607,8 @@ def extract_poster(
 def extract_cover_art(source: Path, output_dir: Path) -> Path | None:
     """Best-effort poster from embedded cover art (audio sources).
 
-    Re-encoded to JPEG and scaled down to fit 1280x1280, never upscaled.
+    Re-encoded to JPEG and scaled down to fit COVER_ART_MAX_SIDE on its long
+    side, never upscaled.
     """
     poster_path = output_dir / "poster.jpg"
     try:
@@ -600,11 +618,7 @@ def extract_cover_art(source: Path, output_dir: Path) -> Path | None:
         run_command(
             [
                 "ffmpeg", "-y", "-i", str(source), "-map", f"0:{index}", "-frames:v", "1",
-                "-vf", (
-                    "scale='min(1280,iw)':'min(1280,ih)'"
-                    ":force_original_aspect_ratio=decrease"
-                ),
-                "-q:v", "3", str(poster_path),
+                "-vf", fit_filter(COVER_ART_MAX_SIDE), "-q:v", "3", str(poster_path),
             ]
         )
         return poster_path if poster_path.exists() else None

@@ -19,13 +19,13 @@ driven entirely by the request — the outputs and their quality (resolution, ra
 Each version tag publishes a multi-tag image to the GitHub Container Registry:
 
 ```
-ghcr.io/hinkolas/runpod-transcoding-worker:0.2.0   # exact version
+ghcr.io/hinkolas/runpod-transcoding-worker:0.2.1   # exact version
 ghcr.io/hinkolas/runpod-transcoding-worker:0.2     # latest patch of 0.2
 ghcr.io/hinkolas/runpod-transcoding-worker:latest  # latest release
 ```
 
 1. In the RunPod console → **Serverless → New Endpoint**, set the container image to a **pinned version**, e.g.
-   `ghcr.io/hinkolas/runpod-transcoding-worker:0.2.0`. Avoid `:latest` in production — it's mutable, so RunPod
+   `ghcr.io/hinkolas/runpod-transcoding-worker:0.2.1`. Avoid `:latest` in production — it's mutable, so RunPod
    may keep serving a cached older image and your deployments aren't reproducible. Pin a semver tag and bump it
    deliberately to upgrade, or reference the image's `@sha256:…` digest for absolute reproducibility. See RunPod's
    [image versioning guide](https://docs.runpod.io/serverless/workers/deploy#image-versioning).
@@ -53,12 +53,26 @@ Pushing a semver tag builds and publishes the worker image automatically via
 [`.github/workflows/worker-image.yml`](.github/workflows/worker-image.yml):
 
 ```sh
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
-This produces `ghcr.io/hinkolas/runpod-transcoding-worker` tagged `0.2.0`, `0.2`, and `latest`. The workflow
+This produces `ghcr.io/hinkolas/runpod-transcoding-worker` tagged `0.2.1`, `0.2`, and `latest`. The workflow
 uses the built-in `GITHUB_TOKEN` (no secrets to configure) and builds `linux/amd64` (RunPod's worker arch).
+
+## Changelog
+
+### v0.2.1
+
+- The poster frame keeps the source's resolution, with its long side capped at 1920 px (it was always 640 px
+  wide). Smaller sources are never upscaled.
+- Embedded cover art is kept up to 3000 px on its long side (it was 1280 px), the size podcast apps ask for.
+- The job schema and the response are unchanged; only `poster.jpg` is larger.
+
+### v0.2.0
+
+- Audio: audio-only sources, audio-only HLS renditions, an mp3/m4a download, waveform peaks and loudness
+  normalisation. Cover art becomes the poster of an audio file.
 
 ## Demo UI
 
